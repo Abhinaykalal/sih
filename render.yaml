@@ -1,0 +1,34 @@
+# Render.com Deployment Blueprint
+# Deploys the AgriSaathi AI FastAPI backend as a Web Service.
+# Set environment variables in Render dashboard (never hardcode secrets here).
+
+services:
+  - type: web
+    name: agrisaathi-api
+    runtime: python
+    region: singapore  # Closest to India
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn mlbackend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: ENFORCE_JWT_AUTH
+        value: "false"
+      - key: OLLAMA_BASE_URL
+        value: ""          # Empty on Render — Ollama is NOT available on free tier
+      - key: GROQ_API_KEY
+        sync: false        # Set this in Render dashboard → Environment → Secret Files
+      - key: GROQ_MODEL
+        value: "llama-3.1-8b-instant"
+      - key: RAG_CHUNK_SIZE
+        value: "350"
+      - key: RAG_TOP_K
+        value: "3"
+      - key: SUPABASE_URL
+        sync: false        # Set in Render dashboard
+      - key: SUPABASE_KEY
+        sync: false        # Set in Render dashboard
+      - key: OPENWEATHER_API_KEY
+        sync: false        # Set in Render dashboard

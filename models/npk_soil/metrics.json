@@ -1,0 +1,6 @@
+{
+  "agronomic_advisory_validity": 1.0,
+  "supported_crops_count": 12,
+  "null_safety_verified": true,
+  "status": "RULE_BASED"
+}

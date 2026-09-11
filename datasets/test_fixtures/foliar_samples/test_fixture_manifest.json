@@ -1,0 +1,10 @@
+{
+  "fixture_type": "Synthetic Foliar RGB Signatures",
+  "classes": [
+    "Rice Brown Spot",
+    "Rice Blast",
+    "Bacterial Leaf Blight",
+    "Healthy Leaf"
+  ],
+  "purpose": "Unit testing and pipeline verification without multi-gigabyte download"
+}

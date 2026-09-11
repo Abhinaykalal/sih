@@ -1,0 +1,34 @@
+# AgriSaathi AI Backend — Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Core API Framework
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Machine Learning
+scikit-learn>=1.4.0
+numpy>=1.26.0
+pandas>=2.0.0
+joblib>=1.3.0
+Pillow>=10.0.0
+
+# HTTP / Networking
+requests>=2.31.0
+httpx>=0.27.0
+
+# Language Detection (offline, no API key)
+langdetect>=1.0.9
+
+# Optional: Text-to-speech for IVR voice
+gtts>=2.5.0
+
+# Optional: Supabase cloud sync (remove if offline-only)
+# supabase>=2.0.0
+
+# Optional: Satellite imagery (NDVI)
+# sentinelhub>=3.9.0
+
+# Optional: Deep translation (requires API key for premium)
+# deep-translator>=1.11.0

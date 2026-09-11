@@ -1,0 +1,98 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Environment variables — NEVER COMMIT THESE
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+ml-backend/.env
+mlbackend/.env
+*.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ML Models (large binary files)
+*.joblib
+*.pkl
+*.h5
+*.pt
+*.onnx
+models/*.joblib
+models/*.pkl
+mlbackend/model.joblib
+
+# Deployment
+.vercel
+tsconfig.tsbuildinfo
+
+# Android & React Native / Expo
+android-app/node_modules/
+android-app/.expo/
+android-app/android/build/
+android-app/android/app/build/
+android-app/android/.gradle/
+android-app/android/app/.cxx/
+android-app/android/app/build/outputs/apk/
+android-app/android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Python Cache
+.pytest_cache/
+htmlcov/
+.coverage
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# SQLite local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Datasets (exclude raw/external/processed)
+datasets/raw/*
+!datasets/raw/.gitkeep
+datasets/external/*
+!datasets/external/.gitkeep
+datasets/processed/*
+!datasets/processed/.gitkeep
+
+# Temporary files
+tmp/
+temp/

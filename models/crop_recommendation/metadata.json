@@ -1,0 +1,50 @@
+{
+  "model_name": "AgriSaathi Crop Recommendation Engine",
+  "version": "1.2.0-Production",
+  "architecture": "RandomForestClassifier(n_estimators=100)",
+  "dataset_name": "Precision Agriculture Crop Recommendation Dataset",
+  "dataset_version": "1.0",
+  "artifact_path": "mlbackend/model.joblib",
+  "artifact_checksum": "5ecea483b806aa0e6f1708d8535d1ed26c2693e4ed0e045ed6719742daaef05e",
+  "classes_count": 22,
+  "classes": [
+    "apple",
+    "banana",
+    "blackgram",
+    "chickpea",
+    "coconut",
+    "coffee",
+    "cotton",
+    "grapes",
+    "jute",
+    "kidneybeans",
+    "lentil",
+    "maize",
+    "mango",
+    "mothbeans",
+    "mungbean",
+    "muskmelon",
+    "orange",
+    "papaya",
+    "pigeonpeas",
+    "pomegranate",
+    "rice",
+    "watermelon"
+  ],
+  "features": [
+    "N",
+    "P",
+    "K",
+    "temperature",
+    "humidity",
+    "ph",
+    "rainfall"
+  ],
+  "training_date": "2026-09-11T06:53:27.574311+00:00",
+  "model_status": "REAL_VERIFIED",
+  "field_validation_required": false,
+  "known_limitations": [
+    "Assumes water availability when recommending high-water crops (e.g., paddy rice, sugarcane)",
+    "Does not factor in dynamic daily agricultural commodity spot market prices"
+  ]
+}

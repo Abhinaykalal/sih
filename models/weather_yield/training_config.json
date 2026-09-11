@@ -1,0 +1,5 @@
+{
+  "engine_type": "Hybrid Climatological & Empirical Agronomic Model",
+  "heatwave_temp_threshold_c": 40.0,
+  "fungal_humidity_threshold_pct": 85.0
+}

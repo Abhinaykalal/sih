@@ -1,0 +1,5 @@
+{"id": "rag-val-001", "question": "What happens if nitrogen fertilizer is applied excessively during cloudy weather in paddy?", "expected_source_topics": ["disease", "rice", "nitrogen"], "language": "en"}
+{"id": "rag-val-002", "question": "How is crop water requirement ETc calculated according to FAO-56?", "expected_source_topics": ["irrigation", "FAO-56", "Kc"], "language": "en"}
+{"id": "rag-val-003", "question": "What is the threshold for applying agricultural lime in acidic soil?", "expected_source_topics": ["fertilizer", "soil pH", "acidity"], "language": "en"}
+{"id": "rag-val-004", "question": "धान में भूरे धब्बे दिखने पर कौन सी दवा का छिड़काव करें?", "expected_source_topics": ["disease", "rice", "mancozeb"], "language": "hi"}
+{"id": "rag-val-005", "question": "పత్తి పంటలో గులాబీ రంగు కాయ తొలుచు పురుగు నివారణకు ఏమి అమర్చాలి?", "expected_source_topics": ["pest_control", "cotton", "telugu"], "language": "te"}

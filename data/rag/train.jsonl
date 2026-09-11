@@ -1,0 +1,6 @@
+{"id": "rag-train-001", "question": "What is the recommended standing water level during vegetative growth of rice?", "expected_source_topics": ["irrigation", "rice", "standing water"], "language": "en"}
+{"id": "rag-train-002", "question": "How much irrigation water does Alternate Wetting and Drying (AWD) save?", "expected_source_topics": ["irrigation", "AWD", "water conservation"], "language": "en"}
+{"id": "rag-train-003", "question": "What foliar spray should be applied for Rice Brown Spot control?", "expected_source_topics": ["disease", "rice", "mancozeb"], "language": "en"}
+{"id": "rag-train-004", "question": "What is the optimal soil pH range for cereal crops?", "expected_source_topics": ["fertilizer", "soil pH", "lime"], "language": "en"}
+{"id": "rag-train-005", "question": "धान के वानस्पतिक चरण में कितना पानी रखना चाहिए?", "expected_source_topics": ["irrigation", "rice", "hindi"], "language": "hi"}
+{"id": "rag-train-006", "question": "వరి సాగులో AWD పద్ధతి ద్వారా ఎంత శాతం నీరు ఆదా అవుతుంది?", "expected_source_topics": ["irrigation", "rice", "telugu"], "language": "te"}

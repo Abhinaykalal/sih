@@ -1,0 +1,19 @@
+{
+  "model_name": "AgriSaathi Pump Motor Vibration Anomaly Detector",
+  "version": "0.1.0-Blocked",
+  "architecture": "1D-CNN / Random Forest Vibration Feature Classifier (Planned)",
+  "dataset_name": "Case Western Reserve University (CWRU) Bearing Vibration Benchmark",
+  "training_date": "2026-09-11T04:47:05.318687+00:00",
+  "model_status": "BLOCKED",
+  "field_validation_required": true,
+  "blocker_details": {
+    "sensor_type": "Unconfirmed (SW-420 digital switch vs ADXL345 I2C/SPI accelerometer)",
+    "sampling_rate": "Unconfirmed (100 Hz vs 1 kHz vs 10 kHz)",
+    "mechanical_mounting": "Unconfirmed physical coupling to pump motor casing"
+  },
+  "known_limitations": [
+    "BLOCKED pending hardware interface contract confirmation",
+    "Monitors mechanical bearing and impeller cavitation ONLY",
+    "Must NEVER be used or claimed to detect foliar crop diseases or agricultural pests"
+  ]
+}

@@ -1,0 +1,16 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r mlbackend/requirements.txt"
+
+[deploy]
+startCommand = "uvicorn mlbackend.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5
+
+[variables]
+PYTHON_VERSION = "3.10"
+# Environment secrets (Set in Railway Dashboard):
+# SUPABASE_URL
+# SUPABASE_KEY

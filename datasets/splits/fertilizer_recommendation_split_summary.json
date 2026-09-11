@@ -1,0 +1,13 @@
+{
+  "dataset": "fertilizer_recommendation",
+  "seed": 42,
+  "total_records": 22,
+  "train_count": 15,
+  "val_count": 3,
+  "test_count": 4,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  }
+}

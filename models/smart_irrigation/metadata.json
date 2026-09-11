@@ -1,0 +1,13 @@
+{
+  "model_name": "AgriSaathi FAO-56 Smart Irrigation & Rain Lockout Engine",
+  "version": "2.1.0-RuleBased",
+  "architecture": "FAO-56 Penman-Monteith Evapotranspiration + Centralized Rain Lockout Invariant",
+  "dataset_name": "FAO-56 Irrigation and Drainage Benchmark",
+  "training_date": "2026-09-11T04:47:04.482122+00:00",
+  "model_status": "RULE_BASED",
+  "field_validation_required": false,
+  "known_limitations": [
+    "Requires accurate crop stage to determine Kc crop coefficient",
+    "Soil moisture sensor depth must match active root zone (15-30cm)"
+  ]
+}

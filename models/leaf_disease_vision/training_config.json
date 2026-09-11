@@ -1,0 +1,16 @@
+{
+  "algorithm": "CalibratedVotingClassifier",
+  "estimators": [
+    "RandomForestClassifier(100)",
+    "GradientBoostingClassifier(100)"
+  ],
+  "voting": "soft",
+  "cv_folds": 3,
+  "split_strategy": "Disjoint Stratified Split (70/15/15)",
+  "split_seed": 42,
+  "leakage_prevention": "File-path disjoint verification",
+  "feature_extraction": "RGB chromatic analysis (greenness, yellowing, browning, texture)",
+  "preprocessing": "PIL resize to 160x160, normalize to [0,1]",
+  "test_fixture_mode": false,
+  "dataset_dir": "C:\\Users\\Abhinay\\OneDrive\\Desktop\\agrisaathi-sih\\datasets\\raw\\plantdoc"
+}

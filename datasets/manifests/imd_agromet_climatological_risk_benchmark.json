@@ -1,0 +1,14 @@
+{
+  "dataset_name": "IMD Agromet Climatological Risk Benchmark",
+  "source_url": "https://mausam.imd.gov.in/agromet/",
+  "license": "Open Government Data (OGD) India",
+  "downloaded_at": "2026-09-11T02:34:58.605034+00:00",
+  "checksum": "992ff133b178889c207470a0b18e4b9093b1c23d7a62f826b1243c399308b4a1",
+  "record_count": 5,
+  "class_count": 3,
+  "split_strategy": "70/15/15 Time-Series Split",
+  "status": "PARTIAL",
+  "limitations": [
+    "Historical reference observations; real-time forecasting requires external IMD or OpenWeather API credentials"
+  ]
+}

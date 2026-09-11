@@ -1,0 +1,16 @@
+{
+  "dataset_name": "Case Western Reserve University (CWRU) Bearing Vibration Benchmark",
+  "source_url": "https://engineering.case.edu/bearingdatacenter",
+  "license": "Open Academic Research Data License",
+  "downloaded_at": "2026-09-11T02:34:58.577501+00:00",
+  "checksum": "HARDWARE_CONFIRMATION_PENDING",
+  "record_count": 0,
+  "class_count": 4,
+  "split_strategy": "Time-Window Disjoint Split (Planned)",
+  "status": "BLOCKED",
+  "limitations": [
+    "BLOCKED: Hardware sampling rate and sensor type (SW-420 vs ADXL345) unconfirmed",
+    "Cannot claim motor anomaly detection without verified physical accelerometer payload",
+    "Must NEVER claim vibration detects crop disease or pests"
+  ]
+}

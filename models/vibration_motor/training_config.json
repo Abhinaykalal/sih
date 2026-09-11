@@ -1,0 +1,5 @@
+{
+  "candidate_architecture": "1D-CNN or FFT Peak Extraction + Random Forest",
+  "expected_input": "Continuous acceleration time-series [ax, ay, az]",
+  "status": "BLOCKED"
+}

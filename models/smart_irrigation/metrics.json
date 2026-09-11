@@ -1,0 +1,6 @@
+{
+  "rule_verification_accuracy": 1.0,
+  "lockout_invariants_tested": 5,
+  "zero_water_waste_enforced": true,
+  "status": "RULE_BASED"
+}

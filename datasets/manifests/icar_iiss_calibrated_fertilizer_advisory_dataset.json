@@ -1,0 +1,15 @@
+{
+  "dataset_name": "ICAR-IISS Calibrated Fertilizer Advisory Dataset",
+  "source_url": "https://raw.githubusercontent.com/Gladiator07/Harvestify/master/Data-processed/fertilizer.csv",
+  "license": "CC0: Public Domain",
+  "downloaded_at": "2026-09-11T02:34:58.541696+00:00",
+  "checksum": "3eba8f2f67e151cb5ff2274703b4f40c228a68867a2a9c45bf8d210901d800e5",
+  "record_count": 22,
+  "class_count": 22,
+  "split_strategy": "70/15/15 Disjoint Reproducible Split",
+  "status": "VERIFIED",
+  "limitations": [
+    "Direct sensor NPK must be calibrated against laboratory soil test",
+    "Foliar chlorosis visual inference must remain marked unconfirmed without sensor"
+  ]
+}

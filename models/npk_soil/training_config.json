@@ -1,0 +1,5 @@
+{
+  "engine_type": "Agronomic Expert Rule-Based System",
+  "guidelines_source": "ICAR-IISS Bhopal Soil Fertility Norms",
+  "visual_vs_sensor_separation": true
+}

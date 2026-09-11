@@ -1,0 +1,13 @@
+{
+  "model_name": "AgriSaathi ICAR-IISS Soil Nutrient Optimization Engine",
+  "version": "1.8.0-RuleBased",
+  "architecture": "ICAR-IISS Agronomic Expert System (Package of Practices)",
+  "dataset_name": "ICAR-IISS Soil Fertility Index & Fertilizer Benchmark",
+  "training_date": "2026-09-11T04:47:04.984511+00:00",
+  "model_status": "RULE_BASED",
+  "field_validation_required": false,
+  "known_limitations": [
+    "Sensor NPK values must be calibrated against certified laboratory soil testing",
+    "Foliar symptom visual diagnosis cannot replace chemical soil test"
+  ]
+}

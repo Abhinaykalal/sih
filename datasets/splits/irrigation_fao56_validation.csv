@@ -1,0 +1,2 @@
+timestamp,soil_moisture_pct,temperature_c,humidity_pct,rain_forecast_mm,rain_prob_pct,crop,action_code
+2026-03-01T12:00:00Z,42.0,34.2,38.0,0.0,5,wheat,HOLD_PUMP

@@ -1,0 +1,13 @@
+{
+  "dataset": "crop_recommendation",
+  "seed": 42,
+  "total_records": 2200,
+  "train_count": 1540,
+  "val_count": 330,
+  "test_count": 330,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  }
+}

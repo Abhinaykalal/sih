@@ -1,0 +1,15 @@
+{
+  "dataset_name": "PlantDoc / PlantVillage Leaf Disease Dataset",
+  "source_url": "https://github.com/pratikkayal/PlantDoc-Dataset",
+  "license": "MIT License / CC BY-SA 4.0",
+  "downloaded_at": "2026-09-11T02:34:58.544628+00:00",
+  "checksum": "ARCHIVE_MANUAL_DOWNLOAD_REQUIRED",
+  "record_count": 0,
+  "class_count": 4,
+  "split_strategy": "Plant-Level Disjoint Split (Planned)",
+  "status": "TEST_ONLY",
+  "limitations": [
+    "Requires manual archive download (~750MB) from https://github.com/pratikkayal/PlantDoc-Dataset",
+    "Test fixture used for CI and pipeline validation; not verified on field cameras"
+  ]
+}

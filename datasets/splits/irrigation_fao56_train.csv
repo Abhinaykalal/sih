@@ -1,0 +1,8 @@
+timestamp,soil_moisture_pct,temperature_c,humidity_pct,rain_forecast_mm,rain_prob_pct,crop,action_code
+2026-03-01T15:00:00Z,14.5,35.5,35.0,0.0,0,cotton,START_PUMP
+2026-03-01T11:00:00Z,19.0,33.0,40.0,0.0,5,wheat,START_PUMP
+2026-03-01T10:00:00Z,22.0,28.5,65.0,12.5,85,rice,RAIN_LOCKOUT_HOLD
+2026-03-01T16:00:00Z,28.0,27.0,80.0,25.0,95,sugarcane,RAIN_LOCKOUT_HOLD
+2026-03-01T13:00:00Z,16.0,30.0,55.0,6.0,60,maize,RAIN_LOCKOUT_HOLD
+2026-03-01T14:00:00Z,25.0,29.0,70.0,0.0,20,cotton,HOLD_PUMP
+2026-03-01T17:00:00Z,12.0,36.0,30.0,0.0,0,tomato,START_PUMP

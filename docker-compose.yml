@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # 1. FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agrisaathi-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - MQTT_BROKER_HOST=mqtt-broker
+      - MQTT_BROKER_PORT=1883
+      - MQTT_UPLINK_TOPIC=agrisaathi/nodes/ESP32_NODE_01/telemetry
+      - MQTT_DOWNLINK_TOPIC=agrisaathi/nodes/ESP32_NODE_01/commands
+      - MQTT_STATUS_TOPIC=agrisaathi/nodes/ESP32_NODE_01/status
+      - ENFORCE_JWT_AUTH=false
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-agrisaathi-dev-jwt-secret}
+    depends_on:
+      - mqtt-broker
+    restart: unless-stopped
+
+  # 2. Local Eclipse Mosquitto MQTT Broker
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: agrisaathi-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./edge_hardware/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  # 3. Next.js Web Frontend
+  web:
+    image: node:20-alpine
+    container_name: agrisaathi-web
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - backend
+    restart: unless-stopped

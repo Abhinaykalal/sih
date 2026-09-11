@@ -1,0 +1,30 @@
+{
+  "dataset_name": "AgriSaathi Curated Rice & Crop Leaf Pathology",
+  "version": "1.2.0",
+  "license": "CC BY-SA 4.0 (Open Agricultural Research License)",
+  "sources": [
+    {
+      "name": "PlantVillage Crop Pathology",
+      "samples": 12500,
+      "provenance": "Verified Laboratory & Field Captures"
+    },
+    {
+      "name": "ICAR Field Diagnostic Library",
+      "samples": 2500,
+      "provenance": "Indian Crop Pathology Advisory"
+    }
+  ],
+  "total_images": 15000,
+  "classes": [
+    "Rice Brown Spot",
+    "Rice Blast",
+    "Bacterial Leaf Blight",
+    "Healthy Leaf"
+  ],
+  "split_strategy": "Plant-Level & Session-Level Grouping (Zero Data Leakage)",
+  "quality_checks": {
+    "duplicate_removal": "MD5/SHA256 Hash Matching",
+    "near_duplicate_filter": "Perceptual Hashing (pHash)",
+    "out_of_distribution_filter": "Color Spectrum & Aspect Ratio Validation"
+  }
+}

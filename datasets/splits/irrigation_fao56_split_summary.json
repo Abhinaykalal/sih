@@ -1,0 +1,13 @@
+{
+  "dataset": "irrigation_fao56",
+  "seed": 42,
+  "total_records": 10,
+  "train_count": 7,
+  "val_count": 1,
+  "test_count": 2,
+  "ratios": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  }
+}

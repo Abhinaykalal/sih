@@ -1,0 +1,15 @@
+{
+  "dataset_name": "FAO-56 Evapotranspiration & Telemetry Reference Dataset",
+  "source_url": "https://www.fao.org/land-water/databases-and-software/cropwat/en/",
+  "license": "FAO Open Access Standard",
+  "downloaded_at": "2026-09-11T02:34:58.575682+00:00",
+  "checksum": "8c70a82d51092401c912e20918d457469ae9016d5cbf3f72849f6f61488fa417",
+  "record_count": 10,
+  "class_count": 3,
+  "split_strategy": "70/15/15 Chronological Telemetry Split",
+  "status": "VERIFIED",
+  "limitations": [
+    "Calculated according to FAO-56 Penman-Monteith guidelines",
+    "Requires field calibration with actual farm crop coefficient (Kc)"
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "model_name": "AgriSaathi Foliar Disease & Nutrient Vision Classifier",
+  "version": "3.0.0-PlantDoc",
+  "architecture": "CalibratedVotingClassifier(RandomForest + GradientBoosting)",
+  "dataset_name": "PlantDoc GitHub Dataset",
+  "dataset_size": 2561,
+  "artifact_path": "mlbackend/vision_model.joblib",
+  "artifact_checksum": "04f991d4e430859f81f37303f023718197481709cba2e4234fcb3288f19be1ab",
+  "classes_count": 27,
+  "classes": [
+    "Apple Scab Leaf",
+    "Apple leaf",
+    "Apple rust leaf",
+    "Bell_pepper leaf",
+    "Bell_pepper leaf spot",
+    "Blueberry leaf",
+    "Cherry leaf",
+    "Corn Gray leaf spot",
+    "Corn leaf blight",
+    "Corn rust leaf",
+    "Peach leaf",
+    "Potato leaf early blight",
+    "Potato leaf late blight",
+    "Raspberry leaf",
+    "Soyabean leaf",
+    "Squash Powdery mildew leaf",
+    "Strawberry leaf",
+    "Tomato Early blight leaf",
+    "Tomato Septoria leaf spot",
+    "Tomato leaf",
+    "Tomato leaf bacterial spot",
+    "Tomato leaf late blight",
+    "Tomato leaf mosaic virus",
+    "Tomato leaf yellow virus",
+    "Tomato mold leaf",
+    "grape leaf",
+    "grape leaf black rot"
+  ],
+  "features": [
+    "greenness",
+    "yellowing",
+    "browning",
+    "texture"
+  ],
+  "training_date": "2026-09-11T06:09:09.024648+00:00",
+  "model_status": "EXPERIMENTAL",
+  "field_validation_required": true,
+  "is_test_fixture": false,
+  "known_limitations": [
+    "Trained on PlantDoc dataset (~2,600 images). Not validated on farm cameras.",
+    "Requires macro focus and balanced ambient lighting; night flash degrades accuracy.",
+    "Evaluated on 409 held-out test images."
+  ],
+  "split_info": {
+    "train": 1779,
+    "val": 370,
+    "test": 409
+  },
+  "leakage_check": "PASSED",
+  "training_time_seconds": 196.0
+}

@@ -1,0 +1,6 @@
+{
+  "engine_type": "Deterministic Agronomic Rule-Based System",
+  "lockout_forecast_threshold_mm": 5.0,
+  "lockout_probability_threshold_pct": 50.0,
+  "default_depletion_fraction_p": 0.55
+}

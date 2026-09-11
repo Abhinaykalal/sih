@@ -1,0 +1,15 @@
+{
+  "dataset_name": "Precision Agriculture Crop Recommendation Dataset",
+  "source_url": "https://raw.githubusercontent.com/Gladiator07/Harvestify/master/Data-processed/crop_recommendation.csv",
+  "license": "CC0: Public Domain",
+  "downloaded_at": "2026-09-11T02:34:58.532086+00:00",
+  "checksum": "808e1d84a544647f1ab2fdae04f434b1842692d6be09eee18a5c2d43eb78d77c",
+  "record_count": 2200,
+  "class_count": 22,
+  "split_strategy": "70/15/15 Disjoint Reproducible Split",
+  "status": "VERIFIED",
+  "limitations": [
+    "Assumes water availability if high-water crop recommended",
+    "Does not account for dynamic local crop market prices"
+  ]
+}
