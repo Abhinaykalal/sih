@@ -27,7 +27,7 @@ import json
 import uuid
 import sqlite3
 from enum import Enum
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 
