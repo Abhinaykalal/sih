@@ -18,14 +18,7 @@ const SCREEN_WIDTH = Dimensions.get('window').width - 32;
 export function TelemetryScreen() {
   const [timeRange, setTimeRange] = useState<'1D' | '7D' | '30D'>('1D');
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState<any[]>([
-    { received_at: '06:00', soil_moisture_pct: 42.1, temperature_c: 24.2, humidity_pct: 75.0, provenance: 'SIMULATED' },
-    { received_at: '08:00', soil_moisture_pct: 43.5, temperature_c: 25.4, humidity_pct: 72.0, provenance: 'SIMULATED' },
-    { received_at: '10:00', soil_moisture_pct: 44.2, temperature_c: 27.1, humidity_pct: 68.0, provenance: 'SIMULATED' },
-    { received_at: '12:00', soil_moisture_pct: 45.8, temperature_c: 29.5, humidity_pct: 64.0, provenance: 'SIMULATED' },
-    { received_at: '14:00', soil_moisture_pct: 45.2, temperature_c: 28.6, humidity_pct: 66.0, provenance: 'SIMULATED' },
-    { received_at: '16:00', soil_moisture_pct: 46.1, temperature_c: 26.8, humidity_pct: 68.4, provenance: 'SIMULATED' },
-  ]);
+  const [history, setHistory] = useState<any[]>([]);
 
   useEffect(() => {
     loadTelemetry();
@@ -35,11 +28,13 @@ export function TelemetryScreen() {
     setLoading(true);
     try {
       const res = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 20);
-      if (res && res.history && res.history.length > 0) {
-        setHistory(res.history.reverse());
+      if (res && res.history && Array.isArray(res.history)) {
+        setHistory([...res.history].reverse());
+      } else {
+        setHistory([]);
       }
     } catch (e: any) {
-      console.warn('Backend unavailable, showing default time-series:', e.message);
+      setHistory([]);
     } finally {
       setLoading(false);
     }
@@ -104,6 +99,10 @@ export function TelemetryScreen() {
         {loading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="small" color={theme.colors.primary} />
+          </View>
+        ) : history.length === 0 ? (
+          <View style={{ padding: 28, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 13, color: '#64748B' }}>Awaiting time-series telemetry packets from node.</Text>
           </View>
         ) : (
           <View style={styles.svgContainer}>

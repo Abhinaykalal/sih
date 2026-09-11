@@ -58,71 +58,92 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch sensor telemetry
+      // 1. Fetch sensor telemetry from live backend
       const telRes = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 1);
-      const latest = telRes && Array.isArray(telRes) ? telRes[0] : telRes?.readings || telRes?.latest;
+      const latest = Array.isArray(telRes)
+        ? telRes[0]
+        : (telRes?.history && telRes.history.length > 0
+            ? telRes.history[0]
+            : (telRes?.readings?.[0] || telRes?.latest || telRes));
 
-      if (latest) {
+      // 2. Fetch live pump state
+      let currentPump = 'OFF';
+      try {
+        const pRes = await ApiClient.pump.getPumpState('ESP32_NODE_01');
+        if (pRes?.state?.reported_state) {
+          currentPump = pRes.state.reported_state;
+        }
+      } catch {
+        // Fallback to telemetry pump status if available
+        if (latest?.pump_active != null) {
+          currentPump = latest.pump_active ? 'ON' : 'OFF';
+        }
+      }
+      setPumpStatus(currentPump);
+
+      // 3. Fetch live weather advice
+      let liveWeather: any = null;
+      try {
+        const wRes = await ApiClient.weather.getWeatherAdvice(30.9010, 75.8573, 'Rice');
+        if (wRes) {
+          liveWeather = wRes;
+          setWeatherData(wRes);
+        }
+      } catch (wErr) {
+        // Weather unavailable
+      }
+
+      if (latest && (latest.soil_moisture_pct !== undefined || latest.soil_moisture !== undefined || latest.temperature_c !== undefined)) {
+        const rainProb = latest.rain_probability_pct ?? liveWeather?.rain_probability_pct ?? null;
+        const rainMm = latest.rain_forecast_mm ?? liveWeather?.rainfall_mm ?? null;
         setTelemetry({
-          soil_moisture_pct: latest.soil_moisture_pct ?? latest.soil_moisture ?? 42.5,
-          temperature_c: latest.temperature_c ?? latest.temperature ?? 27.2,
-          humidity_pct: latest.humidity_pct ?? latest.humidity ?? 65.0,
-          soil_n: latest.soil_n ?? latest.nitrogen ?? null,
-          soil_p: latest.soil_p ?? latest.phosphorus ?? null,
-          soil_k: latest.soil_k ?? latest.potassium ?? null,
-          soil_ph: latest.soil_ph ?? latest.ph ?? 6.8,
-          battery_level: latest.battery_level ?? 92,
-          wifi_rssi: latest.wifi_rssi ?? -64,
-          pump_state: latest.pump_state || 'OFF',
-          rain_detected: latest.rain_detected ?? false,
-          rain_probability_pct: latest.rain_probability_pct ?? 15,
-          rain_forecast_mm: latest.rain_forecast_mm ?? 0.0,
-          lockout_active: latest.rain_probability_pct >= 50,
-          timestamp: latest.timestamp || new Date().toISOString(),
-          provenance: latest.is_simulated ? 'SIMULATED' : 'LIVE_SENSOR',
+          soil_moisture_pct: latest.soil_moisture_pct ?? latest.soil_moisture ?? null,
+          temperature_c: latest.temperature_c ?? latest.temperature ?? null,
+          humidity_pct: latest.humidity_pct ?? latest.humidity ?? null,
+          soil_n: latest.nitrogen ?? latest.soil_n ?? null,
+          soil_p: latest.phosphorus ?? latest.soil_p ?? null,
+          soil_k: latest.potassium ?? latest.soil_k ?? null,
+          soil_ph: latest.ph ?? latest.soil_ph ?? null,
+          battery_level: latest.battery_level ?? null,
+          wifi_rssi: latest.wifi_rssi ?? null,
+          pump_state: currentPump,
+          rain_detected: latest.rain_detected ?? null,
+          rain_probability_pct: rainProb,
+          rain_forecast_mm: rainMm,
+          lockout_active: rainProb != null ? rainProb >= 50 : false,
+          timestamp: latest.received_at || latest.timestamp || new Date().toISOString(),
+          provenance: latest.data_source || (latest.is_simulated ? 'SIMULATED' : 'LIVE_SENSOR'),
         });
-        setPumpStatus(latest.pump_state || 'OFF');
         setIsOffline(false);
         setLastSyncTime(new Date());
         await OfflineStore.cacheSensorTelemetry(latest);
       } else {
-        throw new Error('No telemetry returned');
-      }
-
-      // 2. Fetch weather advice
-      try {
-        const wRes = await ApiClient.weather.getWeatherAdvice(30.9010, 75.8573, 'Rice');
-        if (wRes) {
-          setWeatherData(wRes);
-        }
-      } catch (wErr) {
-        console.warn('Weather fetch offline:', wErr);
+        throw new Error('No telemetry packet returned by server');
       }
     } catch (e: any) {
-      console.warn('Backend unavailable, loading cached telemetry:', e.message);
       const cached = await OfflineStore.getCachedSensorTelemetry();
       if (cached?.data) {
         setTelemetry(cached.data);
         setIsOffline(true);
       } else {
-        // Honest fallback with explicit provenance label
+        // Truthful state: Telemetry unavailable, zero fabricated data
         setTelemetry({
-          soil_moisture_pct: 38.5,
-          temperature_c: 28.0,
-          humidity_pct: 62.0,
+          soil_moisture_pct: null,
+          temperature_c: null,
+          humidity_pct: null,
           soil_n: null,
           soil_p: null,
           soil_k: null,
-          soil_ph: 6.5,
-          battery_level: 90,
-          wifi_rssi: -68,
-          pump_state: 'OFF',
-          rain_detected: false,
-          rain_probability_pct: 10,
-          rain_forecast_mm: 0.0,
+          soil_ph: null,
+          battery_level: null,
+          wifi_rssi: null,
+          pump_state: 'UNKNOWN',
+          rain_detected: null,
+          rain_probability_pct: null,
+          rain_forecast_mm: null,
           lockout_active: false,
-          timestamp: new Date().toISOString(),
-          provenance: 'SIMULATED',
+          timestamp: null,
+          provenance: 'UNAVAILABLE',
         });
         setIsOffline(true);
       }

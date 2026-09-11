@@ -31,53 +31,15 @@ export function AlertsScreen() {
         severity: activeFilter === 'ALL' ? undefined : activeFilter,
         limit: 30,
       });
-      if (res && res.notifications && res.notifications.length > 0) {
+      if (res && res.notifications) {
         setNotifications(res.notifications);
         setSyncState('SYNCED');
       } else {
-        // Fallback demo notifications with explicit provenance
-        setNotifications([
-          {
-            id: 'notif_001',
-            notification_type: 'RAIN_LOCKOUT_ACTIVATED',
-            severity: 'WARNING',
-            title: 'Rain Lockout Activated',
-            message: 'Automatic pump activation held on Zone 1 due to 85% rain forecast (12.0 mm).',
-            created_at: new Date().toISOString(),
-            read_at: null,
-            device_id: 'ESP32_NODE_01',
-            provenance: 'RULE_BASED',
-            sync_state: 'SYNCED',
-          },
-          {
-            id: 'notif_002',
-            notification_type: 'SOIL_MOISTURE_LOW',
-            severity: 'WARNING',
-            title: 'Soil Moisture Low (Zone 2)',
-            message: 'Orchard soil moisture dipped to 28.4%. Consider drip scheduling.',
-            created_at: new Date(Date.now() - 45 * 60000).toISOString(),
-            read_at: null,
-            device_id: 'ESP32_NODE_02',
-            provenance: 'LIVE_SENSOR',
-            sync_state: 'SYNCED',
-          },
-          {
-            id: 'notif_003',
-            notification_type: 'DEVICE_BACK_ONLINE',
-            severity: 'INFO',
-            title: 'ESP32 Node 01 Online',
-            message: 'Physical sensor node re-established MQTT telemetry heartbeat.',
-            created_at: new Date(Date.now() - 120 * 60000).toISOString(),
-            read_at: new Date().toISOString(),
-            device_id: 'ESP32_NODE_01',
-            provenance: 'LIVE_SENSOR',
-            sync_state: 'SYNCED',
-          },
-        ]);
+        setNotifications([]);
         setSyncState('SYNCED');
       }
     } catch (e: any) {
-      console.warn('Backend notifications offline:', e.message);
+      setNotifications([]);
       setSyncState('OFFLINE');
     } finally {
       setLoading(false);

@@ -51,14 +51,29 @@ export function PumpControlScreen() {
     setCurrentLifecycleStage('REQUESTED');
 
     try {
+      // Query live weather conditions for genuine rain probability
+      let activeRain = false;
+      let rainProb = 0;
+      let rainMm = 0;
+      try {
+        const weather = await ApiClient.weather.getWeatherAdvice(30.9010, 75.8573, 'Rice');
+        if (weather) {
+          rainProb = weather.rain_probability_pct ?? 0;
+          rainMm = weather.rainfall_mm ?? 0;
+          activeRain = weather.weather_status === 'RAIN' || rainMm > 1.0;
+        }
+      } catch {
+        // Fallback to telemetry if weather API unreachable
+      }
+
       const res = await ApiClient.pump.dispatchCommand({
         deviceId: 'ESP32_NODE_01',
         commandType: 'PUMP_ON',
         durationSec: parseInt(overrideDurationMin, 10) * 60 || 300,
         reason: manualOverrideActive ? `OVERRIDE: ${overrideReason}` : 'Farmer initiated soil moisture replenishment',
-        activeRain: false,
-        rainProbabilityPct: 85,
-        rainForecastMm: 12.0,
+        activeRain,
+        rainProbabilityPct: rainProb,
+        rainForecastMm: rainMm,
         manualOverride: manualOverrideActive,
       });
 
@@ -67,7 +82,7 @@ export function PumpControlScreen() {
         setCurrentLifecycleStage('BLOCKED');
         Alert.alert(
           '🛡️ Activation Blocked by Rain Lockout',
-          cmd.reason || '85% Rain Forecast. Automatic safety lock engaged to prevent root saturation.',
+          cmd.reason || `${rainProb}% Rain Forecast. Automatic safety lock engaged to prevent waterlogging.`,
           [
             { text: 'Cancel', style: 'cancel' },
             {

@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_URL_STORAGE_KEY = '@agrisaathi_api_url';
 export const AUTH_TOKEN_STORAGE_KEY = '@agrisaathi_auth_token';
-export const DEFAULT_API_URL = 'http://10.0.2.2:8000'; // Android emulator localhost alias or local LAN
+export const DEFAULT_API_URL = 'https://agrisaathi-6dg1.onrender.com'; // AgriSaathi Cloud Intelligence Backend (Render)
 
 export async function getBackendBaseUrl(): Promise<string> {
   try {
@@ -91,7 +91,7 @@ export class VisionClient extends BaseApiClient {
     return this.fetchApi('/api/vision-diagnose', {
       method: 'POST',
       body: JSON.stringify({
-        image: base64Image,
+        image_base64: base64Image,
         crop_type: cropName,
         growth_stage: growthStage,
       }),
@@ -252,6 +252,10 @@ export class DeviceClient extends BaseApiClient {
 }
 
 export class AIClient extends BaseApiClient {
+  async getHealth() {
+    return this.fetchApi('/api/ai/health', { method: 'GET' });
+  }
+
   async getStatus() {
     return this.fetchApi('/api/ai/status', { method: 'GET' });
   }
@@ -261,7 +265,9 @@ export class AIClient extends BaseApiClient {
   }
 
   async chat(payload: {
-    question: string;
+    message?: string;
+    question?: string;
+    context?: string;
     language?: string;
     farm_id?: string;
     zone_id?: string;
@@ -270,15 +276,18 @@ export class AIClient extends BaseApiClient {
     top_k?: number;
     model?: string;
   }) {
+    const q = payload.message || payload.question || '';
     return this.fetchApi('/api/ai/chat', {
       method: 'POST',
       body: JSON.stringify({
-        question: payload.question,
+        message: q,
+        question: q,
+        context: payload.context,
         language: payload.language || 'en',
         farm_id: payload.farm_id || 'farm-alpha',
         zone_id: payload.zone_id || 'zone-1',
-        include_sensor_context: payload.include_sensor_context ?? true,
-        include_weather_context: payload.include_weather_context ?? true,
+        include_sensor_context: payload.include_sensor_context ?? false,
+        include_weather_context: payload.include_weather_context ?? false,
         top_k: payload.top_k ?? 3,
         model: payload.model,
       }),
@@ -305,6 +314,31 @@ export class AIClient extends BaseApiClient {
   }
 }
 
+export class IrrigationClient extends BaseApiClient {
+  async assessIrrigation(payload?: {
+    crop?: string;
+    growth_stage?: string;
+    soil_moisture?: number | null;
+    temperature_c?: number | null;
+    humidity_pct?: number | null;
+    rain_probability_pct?: number | null;
+    rain_forecast_mm?: number | null;
+  }) {
+    return this.fetchApi('/api/irrigation/assess', {
+      method: 'POST',
+      body: JSON.stringify({
+        crop: payload?.crop || 'Rice',
+        growth_stage: payload?.growth_stage || 'Vegetative',
+        soil_moisture: payload?.soil_moisture ?? null,
+        temperature_c: payload?.temperature_c ?? null,
+        humidity_pct: payload?.humidity_pct ?? null,
+        rain_probability_pct: payload?.rain_probability_pct ?? 0,
+        rain_forecast_mm: payload?.rain_forecast_mm ?? 0,
+      }),
+    });
+  }
+}
+
 // Export Unified Singleton ApiClient
 export const ApiClient = {
   ai: new AIClient(),
@@ -312,6 +346,7 @@ export const ApiClient = {
   vision: new VisionClient(),
   sensor: new SensorClient(),
   pump: new PumpClient(),
+  irrigation: new IrrigationClient(),
   crop: new CropRecommendationClient(),
   notifications: new NotificationClient(),
   farm: new FarmMetadataClient(),

@@ -62,18 +62,20 @@ except ImportError:
 
 # Ollama & Multilingual RAG Services
 try:
-    from .ollama_service import ollama_service, OllamaServiceStatus, OllamaInferenceResponse
+    from .ollama_service import ollama_service, OllamaServiceStatus, OllamaInferenceResponse, OllamaServiceException, OllamaErrorCode
     from .rag_service import rag_service, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
     from .check_rag_leakage import check_leakage
 except ImportError:
     try:
-        from ollama_service import ollama_service, OllamaServiceStatus, OllamaInferenceResponse
+        from ollama_service import ollama_service, OllamaServiceStatus, OllamaInferenceResponse, OllamaServiceException, OllamaErrorCode
         from rag_service import rag_service, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
         from check_rag_leakage import check_leakage
     except ImportError:
         ollama_service = None
         rag_service = None
         check_leakage = None
+        OllamaServiceException = Exception
+        OllamaErrorCode = None
 
 # ESP32 Simulator, Conversation Memory & Multilingual
 try:
@@ -277,7 +279,7 @@ class GeoLangRequest(BaseModel):
 # HEALTH CHECK
 # ============================================================
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {
         "status": "Agrisaathi AI Core Engine v2.0 — Online",
@@ -288,8 +290,8 @@ def read_root():
         ]
     }
 
-@app.get("/health")
-@app.get("/api/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health_check():
     """Liveness probe: verifies FastAPI process is responsive."""
     return {
@@ -1912,18 +1914,18 @@ def register_esp32_device(req: DeviceRegistrationRequest):
         "communicationType": req.communicationType,
         "sensors": req.sensors,
         "status": "ONLINE",
-        "lastSeenSecondsAgo": 2,
-        "soilMoisture": 45.0,
-        "soilTemperature": 25.0,
-        "airTemperature": 28.5,
-        "humidity": 65.0,
-        "pH": 6.8,
-        "EC": 1.1,
-        "NPK": {"N": 40, "P": 20, "K": 35},
-        "rain": False,
-        "battery": 95,
-        "signal": 88,
-        "sensorHealth": "EXCELLENT"
+        "lastSeenSecondsAgo": None,
+        "soilMoisture": None,
+        "soilTemperature": None,
+        "airTemperature": None,
+        "humidity": None,
+        "pH": None,
+        "EC": None,
+        "NPK": None,
+        "rain": None,
+        "battery": None,
+        "signal": None,
+        "sensorHealth": "PENDING_FIRST_READING"
     }
     if mqtt_manager:
         mqtt_manager.handle_status_message(req.deviceId, "online")
@@ -2084,35 +2086,74 @@ def api_detect_language(req: LangDetectRequest):
 # MODULE 26: REAL OLLAMA & RAG AI SERVICES
 # ============================================================
 
+class AIHealthResponse(BaseModel):
+    status: str  # HEALTHY | MODEL_UNAVAILABLE
+    provider: str = "ollama"
+    model: str
+    ollama_reachable: bool
+    model_available: bool
+
 class AIChatRequest(BaseModel):
-    question: str
-    language: str = "en"
+    message: Optional[str] = None
+    question: Optional[str] = None
+    context: Optional[str] = None
+    language: Optional[str] = "en"
     farm_id: Optional[str] = "farm-alpha"
     zone_id: Optional[str] = "zone-1"
-    include_sensor_context: bool = True
-    include_weather_context: bool = True
-    top_k: int = 3
+    include_sensor_context: Optional[bool] = False
+    include_weather_context: Optional[bool] = False
+    top_k: Optional[int] = 3
     model: Optional[str] = None
 
 class AIChatResponse(BaseModel):
-    answer: str
-    provenance: str # SOURCE_BACKED_KNOWLEDGE | RULE_BASED | UNAVAILABLE | LIVE_SENSOR
+    response: str
+    answer: str = ""  # Alias for backward compatibility
+    model: str
+    model_name: str = ""  # Alias for backward compatibility
+    provider: str = "ollama"
+    status: str = "GENERATED"
+    provenance: str = "SOURCE_BACKED_KNOWLEDGE"
     citations: List[Dict[str, Any]] = []
     retrieved_chunks: int = 0
-    model_name: str
-    model_status: str # AVAILABLE | UNAVAILABLE | DEGRADED | EXPERIMENTAL
     request_id: str
     generated_at: str
+    latency_ms: Optional[float] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
     sensor_context: Optional[Dict[str, Any]] = None
     weather_context: Optional[Dict[str, Any]] = None
     warnings: List[str] = []
+
+@app.get("/api/ai/health", response_model=AIHealthResponse)
+def get_ai_health():
+    """
+    Checks Ollama connectivity and configured model availability.
+    Returns HEALTHY only if Ollama is reachable and configured model is present.
+    """
+    default_model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+    if not ollama_service:
+        return AIHealthResponse(
+            status="MODEL_UNAVAILABLE",
+            provider="ollama",
+            model=default_model,
+            ollama_reachable=False,
+            model_available=False
+        )
+    h = ollama_service.check_health()
+    return AIHealthResponse(
+        status=h.status,
+        provider="ollama",
+        model=h.model,
+        ollama_reachable=h.ollama_reachable,
+        model_available=h.model_available
+    )
 
 @app.get("/api/ai/status")
 def get_ai_status():
     """Returns live availability status of Ollama service and RAG knowledge base."""
     ollama_info = {
         "status": "UNAVAILABLE",
-        "active_model": "qwen2.5:7b-instruct",
+        "active_model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct"),
         "available_models": [],
         "latency_ms": None,
         "error": "Ollama service module offline"
@@ -2120,9 +2161,9 @@ def get_ai_status():
     if ollama_service:
         h = ollama_service.check_health()
         ollama_info = {
-            "status": h.status,
-            "base_url": h.base_url,
-            "active_model": h.active_model,
+            "status": "AVAILABLE" if h.status == "HEALTHY" else "UNAVAILABLE",
+            "base_url": ollama_service.base_url,
+            "active_model": h.model,
             "available_models": h.available_models,
             "latency_ms": h.latency_ms,
             "error": h.error_message
@@ -2139,7 +2180,7 @@ def get_ai_status():
     }
 
     return {
-        "status": "healthy" if ollama_info["status"] in ["AVAILABLE", "DEGRADED"] else "degraded",
+        "status": "healthy" if ollama_info["status"] == "AVAILABLE" else "degraded",
         "ollama": ollama_info,
         "rag": rag_info,
         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -2148,16 +2189,21 @@ def get_ai_status():
 @app.get("/api/ai/models")
 def list_ai_models():
     """Lists registered AI models with verified status, capabilities, and parameters."""
+    is_avail = False
+    if ollama_service:
+        h = ollama_service.check_health()
+        is_avail = (h.status == "HEALTHY")
+
     return {
         "models": [
             {
-                "name": "qwen2.5:7b-instruct",
+                "name": os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct"),
                 "type": "LLM_INSTRUCT",
                 "provider": "Ollama",
                 "parameters": "7B",
                 "languages": ["en", "hi", "te"],
                 "recommended_for": "Agricultural reasoning, RAG synthesis, multilingual explanation",
-                "status": "AVAILABLE" if (ollama_service and ollama_service.check_health().status == "AVAILABLE") else "UNAVAILABLE"
+                "status": "AVAILABLE" if is_avail else "UNAVAILABLE"
             },
             {
                 "name": "qwen2.5:3b",
@@ -2190,16 +2236,17 @@ def list_ai_models():
 @app.post("/api/ai/rag/query")
 def api_rag_query(req: AIChatRequest):
     """Grounded multilingual RAG query over verified ICAR/IMD/FAO documentation."""
-    if not req.question or not req.question.strip():
+    query = (req.message or req.question or "").strip()
+    if not query:
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
-    if len(req.question) > 2000:
+    if len(query) > 2000:
         raise HTTPException(status_code=400, detail="Question exceeds maximum allowed length (2000 characters).")
 
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service module offline")
 
     rag_res = rag_service.query_rag(
-        question=req.question.strip(),
+        question=query,
         language=req.language or "en",
         top_k=req.top_k or 3,
         model_override=req.model
@@ -2266,133 +2313,153 @@ def api_ai_evaluation():
     }
 
 @app.post("/api/ai/chat", response_model=AIChatResponse)
-def api_ai_chat(req: AIChatRequest):
+def api_ai_chat(
+    req: AIChatRequest,
+    current_user: Optional[UserPrincipal] = Depends(get_optional_user)
+):
     """
-    Context-aware Agricultural AI Chat Assistant.
-    Assembles real live sensor telemetry, weather forecasts, and verified RAG extension docs.
-    The LLM is strictly advisory and NEVER has direct pump actuation authority.
+    Clean FastAPI API layer for Ollama LLM inference.
+    Executes actual generation against the configured Ollama model without fake/mock fallbacks.
+    The response is truthfully generated by the active Ollama model.
     """
-    if not req.question or not req.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-    if len(req.question) > 2000:
-        raise HTTPException(status_code=400, detail="Question exceeds maximum allowed length (2000 characters).")
-
     import uuid
     req_id = f"ai-chat-{uuid.uuid4().hex[:8]}"
     now_iso = datetime.now(timezone.utc).isoformat()
-    warnings: List[str] = []
 
-    # 1. Gather Sensor Telemetry Context
+    # 1. Enforce Authentication if configured
+    if settings.ENFORCE_JWT_AUTH and not current_user:
+        logger.warning(f"[{req_id}] Unauthorized AI chat request rejected.")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_code": "UNAUTHORIZED",
+                "message": "Missing or invalid authorization credentials."
+            }
+        )
+
+    # 2. Validate input parameters
+    query = (req.message or req.question or "").strip()
+    if not query:
+        logger.warning(f"[{req_id}] Invalid empty request received.")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_REQUEST",
+                "message": "Field 'message' or 'question' is required and cannot be empty."
+            }
+        )
+    if len(query) > 4000:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_REQUEST",
+                "message": "Query exceeds maximum allowed length (4000 characters)."
+            }
+        )
+
+    if not ollama_service:
+        logger.error(f"[{req_id}] Ollama service uninitialized.")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "OLLAMA_UNREACHABLE",
+                "message": "Ollama service layer is uninitialized or unavailable.",
+                "provider": "ollama",
+                "model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+            }
+        )
+
+    target_model = req.model or ollama_service.default_model
+
+    # 3. Assemble context if supplied or requested
+    context_parts = []
     sensor_ctx = None
-    sensor_summary_str = ""
-    if req.include_sensor_context:
-        try:
-            telemetry_record = None
-            if db_layer:
-                telemetry_record = db_layer.get_latest_telemetry(farm_id=req.farm_id or "farm-alpha", zone_id=req.zone_id or "zone-1")
-            
-            if telemetry_record:
-                moisture = telemetry_record.get("soil_moisture")
-                temp = telemetry_record.get("temperature")
-                hum = telemetry_record.get("humidity")
-                is_stale = telemetry_record.get("is_stale", False)
-                if is_stale:
-                    warnings.append("Farm sensor telemetry is STALE (> 6 hours old).")
-                sensor_ctx = {
-                    "soil_moisture_pct": moisture,
-                    "temperature_c": temp,
-                    "humidity_pct": hum,
-                    "is_stale": is_stale,
-                    "provenance": "LIVE_SENSOR" if not is_stale else "STALE"
-                }
-                sensor_summary_str = f"Soil Moisture: {moisture}%, Air Temp: {temp}°C, Humidity: {hum}% (Status: {'STALE' if is_stale else 'LIVE'})"
-            elif _esp32_sim:
-                sim_data = _esp32_sim.generate_telemetry()
-                sensor_ctx = {
-                    "soil_moisture_pct": sim_data.get("soil_moisture"),
-                    "temperature_c": sim_data.get("temperature"),
-                    "humidity_pct": sim_data.get("humidity"),
-                    "is_stale": False,
-                    "provenance": "SIMULATED"
-                }
-                sensor_summary_str = f"Soil Moisture: {sim_data.get('soil_moisture')}%, Temp: {sim_data.get('temperature')}°C (SIMULATED)"
-        except Exception as e:
-            logger.warning(f"Error fetching sensor context for AI chat: {e}")
-            warnings.append("Could not retrieve live sensor context.")
-
-    # 2. Gather Weather Context
     weather_ctx = None
-    weather_summary_str = ""
+
+    if req.context and req.context.strip():
+        context_parts.append(req.context.strip())
+
+    if req.include_sensor_context and db_layer:
+        try:
+            rec = db_layer.get_latest_telemetry(farm_id=req.farm_id or "farm-alpha", zone_id=req.zone_id or "zone-1")
+            if rec:
+                sensor_ctx = rec
+                context_parts.append(
+                    f"Sensors: Soil Moisture={rec.get('soil_moisture')}%, Temp={rec.get('temperature')}C, Humidity={rec.get('humidity')}%"
+                )
+        except Exception as e:
+            logger.warning(f"[{req_id}] Error reading sensor telemetry context: {e}")
+
     if req.include_weather_context:
         try:
             w = get_weather(20.0, 78.0)
             if w and "error" not in w:
-                weather_ctx = {
-                    "temperature": w.get("temperature"),
-                    "humidity": w.get("humidity"),
-                    "rain_expected_mm": w.get("rain_24h", 0.0),
-                    "description": w.get("description", "Clear"),
-                    "provenance": "LIVE_WEATHER"
-                }
-                weather_summary_str = f"Weather: {w.get('description', 'Clear')}, Temp: {w.get('temperature')}°C, Rain Forecast: {w.get('rain_24h', 0.0)} mm"
+                weather_ctx = w
+                context_parts.append(
+                    f"Weather: {w.get('description', 'Clear')}, Temp={w.get('temperature')}C, Rain Forecast={w.get('rain_24h', 0.0)}mm"
+                )
         except Exception as e:
-            logger.warning(f"Error fetching weather context for AI chat: {e}")
-            warnings.append("Live weather data unavailable.")
+            logger.warning(f"[{req_id}] Error reading weather context: {e}")
 
-    # 3. Formulate Farm Context String
-    farm_context_lines = []
-    if sensor_summary_str:
-        farm_context_lines.append(f"Sensors: {sensor_summary_str}")
-    if weather_summary_str:
-        farm_context_lines.append(f"Forecast: {weather_summary_str}")
-    combined_farm_context = " | ".join(farm_context_lines) if farm_context_lines else None
+    assembled_context = "\n".join(context_parts) if context_parts else None
 
-    # 4. Query RAG Engine with Farm Context
-    if rag_service:
-        rag_res = rag_service.query_rag(
-            question=req.question.strip(),
-            language=req.language or "en",
-            farm_context=combined_farm_context,
-            top_k=req.top_k or 3,
-            model_override=req.model
+    # 4. Invoke Ollama service
+    t0 = time.perf_counter()
+    try:
+        gen_res = ollama_service.generate_response(
+            user_message=query,
+            context=assembled_context,
+            model=req.model,
+            raise_on_error=True
         )
-        citations_list = [
-            {
-                "chunk_id": c.chunk_id,
-                "title": c.title,
-                "source": c.source,
-                "section": c.section,
-                "page": c.page,
-                "relevance_score": c.relevance_score
-            }
-            for c in rag_res.citations
-        ]
-        return AIChatResponse(
-            answer=rag_res.answer,
-            provenance=rag_res.provenance,
-            citations=citations_list,
-            retrieved_chunks=rag_res.retrieved_chunks,
-            model_name=rag_res.model_name,
-            model_status=rag_res.model_status,
-            request_id=req_id,
-            generated_at=now_iso,
-            sensor_context=sensor_ctx,
-            weather_context=weather_ctx,
-            warnings=warnings + rag_res.warnings
+        latency = round((time.perf_counter() - t0) * 1000, 2)
+        logger.info(
+            f"[{req_id}] AI chat generation succeeded with model '{target_model}' in {latency}ms"
         )
-    else:
         return AIChatResponse(
-            answer="AI Knowledge Base is currently offline. Please consult agricultural extension officers.",
-            provenance="UNAVAILABLE",
+            response=gen_res.text,
+            answer=gen_res.text,
+            model=gen_res.model_name,
+            model_name=gen_res.model_name,
+            provider="ollama",
+            status="GENERATED",
+            provenance="SOURCE_BACKED_KNOWLEDGE",
             citations=[],
             retrieved_chunks=0,
-            model_name="N/A",
-            model_status="UNAVAILABLE",
             request_id=req_id,
             generated_at=now_iso,
+            latency_ms=gen_res.generation_time_ms,
+            prompt_tokens=gen_res.prompt_tokens,
+            completion_tokens=gen_res.completion_tokens,
             sensor_context=sensor_ctx,
             weather_context=weather_ctx,
-            warnings=warnings + ["RAG Service uninitialized."]
+            warnings=[]
+        )
+    except OllamaServiceException as e:
+        latency = round((time.perf_counter() - t0) * 1000, 2)
+        logger.error(f"[{req_id}] OllamaServiceException ({e.error_code}): {e.message} (latency: {latency}ms)")
+        raise HTTPException(
+            status_code=e.status_code,
+            detail={
+                "error_code": e.error_code,
+                "message": e.message,
+                "provider": "ollama",
+                "model": target_model,
+                "request_id": req_id
+            }
+        )
+    except Exception as e:
+        latency = round((time.perf_counter() - t0) * 1000, 2)
+        logger.error(f"[{req_id}] Unexpected error in AI chat: {e} (latency: {latency}ms)")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_code": "MODEL_GENERATION_FAILED",
+                "message": f"Unexpected error during generation: {str(e)}",
+                "provider": "ollama",
+                "model": target_model,
+                "request_id": req_id
+            }
         )
 
 

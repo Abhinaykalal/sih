@@ -16,6 +16,7 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TelemetryScreen } from './src/screens/TelemetryScreen';
 import { DecisionScreen } from './src/screens/DecisionScreen';
 import { PumpControlScreen } from './src/screens/PumpControlScreen';
+import { ChatScreen } from './src/screens/ChatScreen';
 
 export type ScreenType =
   | 'sensors'
@@ -25,6 +26,7 @@ export type ScreenType =
   | 'alerts'
   | 'telemetry'
   | 'decision'
+  | 'chat'
   | 'settings';
 
 export default function App() {
@@ -46,6 +48,8 @@ export default function App() {
         return <TelemetryScreen />;
       case 'decision':
         return <DecisionScreen />;
+      case 'chat':
+        return <ChatScreen />;
       case 'settings':
         return <SettingsScreen />;
       default:
@@ -68,6 +72,13 @@ export default function App() {
         </View>
 
         <View style={styles.headerRightActions}>
+          <TouchableOpacity
+            style={[styles.headerIconBtn, activeScreen === 'chat' && styles.headerIconBtnActive]}
+            onPress={() => setActiveScreen('chat')}
+          >
+            <Text style={styles.headerIconText}>💬</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.headerIconBtn, activeScreen === 'decision' && styles.headerIconBtnActive]}
             onPress={() => setActiveScreen('decision')}

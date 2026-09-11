@@ -57,21 +57,24 @@ export function CropRecommendationScreen() {
     setErrorMsg(null);
     try {
       const res = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 1);
-      const latest = res && Array.isArray(res) ? res[0] : res?.readings || res?.latest;
-      if (latest) {
-        if (latest.soil_n != null) setN(String(latest.soil_n));
-        if (latest.soil_p != null) setP(String(latest.soil_p));
-        if (latest.soil_k != null) setK(String(latest.soil_k));
-        if (latest.soil_ph != null) setPh(String(latest.soil_ph));
-        if (latest.temperature != null) setTemp(String(latest.temperature));
-        if (latest.humidity != null) setHumidity(String(latest.humidity));
+      const latest = Array.isArray(res)
+        ? res[0]
+        : (res?.history && res.history.length > 0
+            ? res.history[0]
+            : (res?.readings?.[0] || res?.latest || res));
+      if (latest && (latest.soil_moisture_pct !== undefined || latest.temperature_c !== undefined || latest.nitrogen !== undefined)) {
+        if (latest.nitrogen != null || latest.soil_n != null) setN(String(latest.nitrogen ?? latest.soil_n));
+        if (latest.phosphorus != null || latest.soil_p != null) setP(String(latest.phosphorus ?? latest.soil_p));
+        if (latest.potassium != null || latest.soil_k != null) setK(String(latest.potassium ?? latest.soil_k));
+        if (latest.ph != null || latest.soil_ph != null) setPh(String(latest.ph ?? latest.soil_ph));
+        if (latest.temperature_c != null || latest.temperature != null) setTemp(String(latest.temperature_c ?? latest.temperature));
+        if (latest.humidity_pct != null || latest.humidity != null) setHumidity(String(latest.humidity_pct ?? latest.humidity));
         setTelemetryPrefilled(true);
       } else {
-        Alert.alert('Notice', 'No recent live sensor packet found. Keeping current parameters.');
+        Alert.alert('Notice', 'No live telemetry packet found on server. You can enter values manually.');
       }
     } catch (e: any) {
-      console.warn('Could not fetch sensor telemetry:', e.message);
-      Alert.alert('Offline Notice', 'Could not connect to sensor telemetry. You can enter values manually.');
+      Alert.alert('Offline Notice', 'Could not reach sensor telemetry backend. You can enter values manually.');
     } finally {
       setFetchingTelemetry(false);
     }

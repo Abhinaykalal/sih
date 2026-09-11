@@ -12,23 +12,27 @@ import {
 import { ApiClient } from '../services/ApiClient';
 
 export function ProvisioningScreen() {
-  const [deviceId, setDeviceId] = useState('ESP32-002');
-  const [deviceName, setDeviceName] = useState('Field 2 Sensor Node');
-  const [farmId, setFarmId] = useState('farm-punjab-01');
-  const [fieldId, setFieldId] = useState('field-rice-02');
+  const [deviceId, setDeviceId] = useState('ESP32_NODE_01');
+  const [deviceName, setDeviceName] = useState('Field Sensor Node 1');
+  const [farmId, setFarmId] = useState('farm-alpha');
+  const [fieldId, setFieldId] = useState('field-rice-01');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const handleRegister = async () => {
+    if (!deviceId.trim()) {
+      setStatusMessage('⚠️ Please specify a Device ID.');
+      return;
+    }
     setLoading(true);
     setStatusMessage(null);
 
     try {
       const res = await ApiClient.device.registerDevice({
-        deviceId,
-        deviceName,
-        farmId,
-        fieldId,
+        deviceId: deviceId.trim(),
+        deviceName: deviceName.trim() || deviceId.trim(),
+        farmId: farmId.trim() || 'farm-alpha',
+        fieldId: fieldId.trim() || 'field-01',
         firmwareVersion: 'v1.4.2',
         communicationType: 'MQTT/Wi-Fi'
       });
@@ -54,9 +58,9 @@ export function ProvisioningScreen() {
         </Text>
 
         <View style={styles.scanBox}>
-          <Text style={styles.scanIcon}>🔍</Text>
-          <Text style={styles.scanText}>Scanning for nearby BLE / Wi-Fi ESP32 nodes...</Text>
-          <Text style={styles.scanSub}>Found: ESP32-002 (Signal -62 dBm)</Text>
+          <Text style={styles.scanIcon}>📡</Text>
+          <Text style={styles.scanText}>Ready to register and link new sensor nodes</Text>
+          <Text style={styles.scanSub}>Assign nodes to agricultural field zones</Text>
         </View>
 
         <View style={styles.formCard}>

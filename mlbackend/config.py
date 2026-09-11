@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     ]
     ENFORCE_JWT_AUTH: bool = os.getenv("ENFORCE_JWT_AUTH", "false").lower() in ("true", "1", "yes")
 
+    # ── Ollama LLM Configuration ──────────────────────────────
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+    OLLAMA_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
+
     # ── Internal ───────────────────────────────────────────────
     MODEL_PATH: str = "model.joblib"
     PORT: int = 8000

@@ -230,13 +230,13 @@ class MQTTServiceManager:
         }
         _latest_telemetry["ESP32_NODE_01"] = {
             "device_id": "ESP32_NODE_01",
-            "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "received_at": None,
             "telemetry": {
-                "soil_moisture_pct": 65.0,
-                "soil_raw_adc": 1450,
-                "temperature_c": 28.5,
-                "humidity_pct": 60.0,
-                "sunlight_detected": True,
+                "soil_moisture_pct": None,
+                "soil_raw_adc": None,
+                "temperature_c": None,
+                "humidity_pct": None,
+                "sunlight_detected": None,
                 "vibration_detected": None,
                 "vibration_rms": None,
                 "nitrogen": None,
@@ -247,10 +247,10 @@ class MQTTServiceManager:
                 "pump_active": False
             },
             "edge_ai": {
-                "last_scan_result": "Early Blight",
-                "confidence_pct": 89.0
+                "last_scan_result": None,
+                "confidence_pct": None
             },
-            "data_source": "MQTT_EDGE"
+            "data_source": "UNAVAILABLE"
         }
 
     def handle_status_message(self, device_id: str, status_payload: str):
