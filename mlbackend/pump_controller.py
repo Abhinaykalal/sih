@@ -8,7 +8,7 @@ Maintains verifiable command lifecycles: requested -> published -> acknowledged 
 
 import time
 import uuid
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 

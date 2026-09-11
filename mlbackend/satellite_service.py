@@ -19,11 +19,13 @@ except ImportError:
 class SatelliteService:
     def __init__(self):
         self.config = SHConfig()
-        self.config.sh_client_id = settings.SENTINEL_CLIENT_ID
-        self.config.sh_client_secret = settings.SENTINEL_CLIENT_SECRET
+        self.config.sh_client_id = getattr(settings, "SENTINEL_CLIENT_ID", "")
+        self.config.sh_client_secret = getattr(settings, "SENTINEL_CLIENT_SECRET", "")
         
     def _is_configured(self) -> bool:
-        return bool(settings.SENTINEL_CLIENT_ID and settings.SENTINEL_CLIENT_SECRET)
+        client_id = getattr(settings, "SENTINEL_CLIENT_ID", "")
+        client_secret = getattr(settings, "SENTINEL_CLIENT_SECRET", "")
+        return bool(client_id and client_secret)
 
     def get_crop_indices(self, lat: float, lon: float, buffer: float = 0.005) -> Dict:
         """
