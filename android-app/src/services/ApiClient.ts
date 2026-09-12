@@ -2,39 +2,29 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_URL_STORAGE_KEY = '@agrisaathi_api_url';
 export const AUTH_TOKEN_STORAGE_KEY = '@agrisaathi_auth_token';
-export const DEFAULT_API_URL = 'https://agrisaathi-6dg1.onrender.com'; // AgriSaathi Cloud Intelligence Backend (Render)
+export const DEFAULT_API_URL = 'https://agrisaathi-6dg1.onrender.com';
 
 export async function getBackendBaseUrl(): Promise<string> {
   try {
     const savedUrl = await AsyncStorage.getItem(API_URL_STORAGE_KEY);
-    if (savedUrl && savedUrl.trim().length > 0) {
-      return savedUrl.trim().replace(/\/+$/, '');
-    }
+    if (savedUrl && savedUrl.trim().length > 0) return savedUrl.trim().replace(/\/+$/, '');
   } catch (e) {
-    console.warn('Failed to load saved API URL, falling back to default:', e);
+    console.warn('Failed to load saved API URL:', e);
   }
   return DEFAULT_API_URL;
 }
 
 export async function setBackendBaseUrl(newUrl: string): Promise<void> {
-  const formatted = newUrl.trim().replace(/\/+$/, '');
-  await AsyncStorage.setItem(API_URL_STORAGE_KEY, formatted);
+  await AsyncStorage.setItem(API_URL_STORAGE_KEY, newUrl.trim().replace(/\/+$/, ''));
 }
 
 export async function getAuthToken(): Promise<string | null> {
-  try {
-    return await AsyncStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-  } catch (e) {
-    return null;
-  }
+  try { return await AsyncStorage.getItem(AUTH_TOKEN_STORAGE_KEY); } catch { return null; }
 }
 
 export async function setAuthToken(token: string | null): Promise<void> {
-  if (token) {
-    await AsyncStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-  } else {
-    await AsyncStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  }
+  if (token) await AsyncStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+  else await AsyncStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
 }
 
 class BaseApiClient {
@@ -42,80 +32,74 @@ class BaseApiClient {
     const baseUrl = await getBackendBaseUrl();
     const token = await getAuthToken();
     const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
-
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      Accept: 'application/json',
       ...(options.headers as Record<string, string> || {}),
     };
+    if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      const response = await fetch(url, {
-        ...options,
-        headers,
-      });
-
+      const response = await fetch(url, { ...options, headers, signal: controller.signal });
+      const text = await response.text();
+      let payload: any = null;
+      try { payload = text ? JSON.parse(text) : null; } catch { payload = { raw: text }; }
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+        const detail = payload?.detail || payload?.message || response.statusText || 'Request failed';
+        throw new Error(`HTTP ${response.status}: ${detail}`);
       }
-
-      return await response.json();
-    } catch (err: any) {
-      console.error(`ApiClient error calling [${endpoint}]:`, err.message);
-      throw err;
+      return payload;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
 
 export class AgentClient extends BaseApiClient {
-  async sendChat(query: string, context?: { crop?: string; stage?: string; fieldId?: string }) {
+  async sendChat(query: string, context?: { crop?: string; stage?: string; fieldId?: string; lat?: number; lon?: number }) {
     return this.fetchApi('/api/chat', {
       method: 'POST',
       body: JSON.stringify({
         message: query,
-        crop: context?.crop || 'Rice',
-        stage: context?.stage || 'Vegetative',
-        field_id: context?.fieldId || 'zone-1-north-field',
+        ...(context?.crop ? { crop: context.crop } : {}),
+        ...(context?.stage ? { stage: context.stage } : {}),
+        ...(context?.fieldId ? { field_id: context.fieldId } : {}),
+        ...(context?.lat != null ? { lat: context.lat } : {}),
+        ...(context?.lon != null ? { lon: context.lon } : {}),
       }),
     });
   }
 }
 
 export class VisionClient extends BaseApiClient {
-  async diagnoseLeafImage(base64Image: string, cropName: string = 'Rice', growthStage: string = 'Vegetative') {
+  async diagnoseLeafImage(base64Image: string, cropName?: string, growthStage?: string) {
+    if (!base64Image || base64Image.length < 100) throw new Error('No valid image data supplied.');
     return this.fetchApi('/api/vision-diagnose', {
       method: 'POST',
       body: JSON.stringify({
         image_base64: base64Image,
-        crop_type: cropName,
-        growth_stage: growthStage,
+        ...(cropName ? { crop_type: cropName } : {}),
+        ...(growthStage ? { growth_stage: growthStage } : {}),
       }),
     });
   }
 }
 
 export class SensorClient extends BaseApiClient {
-  async getTelemetry(deviceId: string = 'ESP32_NODE_01', limit: number = 20) {
-    return this.fetchApi(`/telemetry?device_id=${encodeURIComponent(deviceId)}&limit=${limit}`, {
-      method: 'GET',
-    });
+  async getTelemetry(deviceId: string, limit: number = 20) {
+    if (!deviceId) throw new Error('deviceId is required.');
+    return this.fetchApi(`/telemetry?device_id=${encodeURIComponent(deviceId)}&limit=${limit}`, { method: 'GET' });
   }
-
-  async getHistoricalTelemetry(deviceId: string = 'ESP32_NODE_01', limit: number = 20) {
-    return this.fetchApi(`/telemetry?device_id=${encodeURIComponent(deviceId)}&limit=${limit}`, {
-      method: 'GET',
-    });
+  async getHistoricalTelemetry(deviceId: string, limit: number = 20) {
+    return this.getTelemetry(deviceId, limit);
   }
 }
 
 export class PumpClient extends BaseApiClient {
   async dispatchCommand(payload: {
-    deviceId?: string;
+    deviceId: string;
     commandType: 'PUMP_ON' | 'PUMP_OFF' | 'MISTER_ON' | 'MISTER_OFF';
     durationSec?: number;
     reason?: string;
@@ -124,222 +108,125 @@ export class PumpClient extends BaseApiClient {
     rainForecastMm?: number;
     manualOverride?: boolean;
   }) {
+    if (!payload.deviceId) throw new Error('deviceId is required.');
     return this.fetchApi('/pump/command', {
       method: 'POST',
       body: JSON.stringify({
-        device_id: payload.deviceId || 'ESP32_NODE_01',
+        device_id: payload.deviceId,
         command_type: payload.commandType,
-        duration_sec: payload.durationSec ?? 300,
-        reason: payload.reason || 'Farmer actuation from AgriSaathi Android App',
-        active_rain: payload.activeRain ?? false,
-        rain_probability_pct: payload.rainProbabilityPct ?? 0.0,
-        rain_forecast_mm: payload.rainForecastMm ?? 0.0,
-        manual_override: payload.manualOverride ?? false,
+        ...(payload.durationSec != null ? { duration_sec: payload.durationSec } : {}),
+        ...(payload.reason ? { reason: payload.reason } : {}),
+        ...(payload.activeRain != null ? { active_rain: payload.activeRain } : {}),
+        ...(payload.rainProbabilityPct != null ? { rain_probability_pct: payload.rainProbabilityPct } : {}),
+        ...(payload.rainForecastMm != null ? { rain_forecast_mm: payload.rainForecastMm } : {}),
+        ...(payload.manualOverride != null ? { manual_override: payload.manualOverride } : {}),
       }),
     });
   }
-
-  async getCommands(deviceId: string = 'ESP32_NODE_01') {
-    return this.fetchApi(`/pump/commands?device_id=${encodeURIComponent(deviceId)}`, {
-      method: 'GET',
-    });
+  async getCommands(deviceId: string) {
+    if (!deviceId) throw new Error('deviceId is required.');
+    return this.fetchApi(`/pump/commands?device_id=${encodeURIComponent(deviceId)}`, { method: 'GET' });
   }
-
-  async getPumpState(deviceId: string = 'ESP32_NODE_01') {
-    return this.fetchApi(`/pump/state?device_id=${encodeURIComponent(deviceId)}`, {
-      method: 'GET',
-    });
+  async getPumpState(deviceId: string) {
+    if (!deviceId) throw new Error('deviceId is required.');
+    return this.fetchApi(`/pump/state?device_id=${encodeURIComponent(deviceId)}`, { method: 'GET' });
   }
 }
 
-
 export class CropRecommendationClient extends BaseApiClient {
   async recommendCrop(features: {
-    N: number;
-    P: number;
-    K: number;
-    temperature: number;
-    humidity: number;
-    ph: number;
-    rainfall: number;
+    N: number; P: number; K: number; temperature: number; humidity: number; ph: number; rainfall: number;
   }) {
-    return this.fetchApi('/api/recommend', {
-      method: 'POST',
-      body: JSON.stringify(features),
-    });
+    return this.fetchApi('/api/recommend', { method: 'POST', body: JSON.stringify(features) });
   }
 }
 
 export class NotificationClient extends BaseApiClient {
-  async getNotifications(params?: {
-    user_id?: string;
-    severity?: string;
-    unread_only?: boolean;
-    limit?: number;
-  }) {
+  async getNotifications(params?: { user_id?: string; severity?: string; unread_only?: boolean; limit?: number }) {
     const q = new URLSearchParams();
     if (params?.user_id) q.append('user_id', params.user_id);
     if (params?.severity) q.append('severity', params.severity);
     if (params?.unread_only) q.append('unread_only', 'true');
     if (params?.limit) q.append('limit', String(params.limit));
-    const qs = q.toString();
-    return this.fetchApi(`/notifications${qs ? '?' + qs : ''}`, { method: 'GET' });
+    return this.fetchApi(`/notifications${q.toString() ? '?' + q.toString() : ''}`, { method: 'GET' });
   }
-
-  async markRead(id: string) {
-    return this.fetchApi(`/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
+  async markRead(id: string) { return this.fetchApi(`/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' }); }
+  async markResolved(id: string) { return this.fetchApi(`/notifications/${encodeURIComponent(id)}/resolve`, { method: 'PATCH' }); }
+  async syncBatch(events: any[], userId: string) {
+    if (!userId) throw new Error('userId is required.');
+    return this.fetchApi('/notifications/sync', { method: 'POST', body: JSON.stringify({ user_id: userId, events }) });
   }
-
-  async markResolved(id: string) {
-    return this.fetchApi(`/notifications/${encodeURIComponent(id)}/resolve`, { method: 'PATCH' });
-  }
-
-  async syncBatch(events: any[], userId: string = '00000000-0000-0000-0000-000000000001') {
-    return this.fetchApi('/notifications/sync', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: userId, events }),
-    });
-  }
-
-  async getSyncStatus() {
-    return this.fetchApi('/notifications/sync/status', { method: 'GET' });
-  }
+  async getSyncStatus() { return this.fetchApi('/notifications/sync/status', { method: 'GET' }); }
 }
 
 export class FarmMetadataClient extends BaseApiClient {
-  async getFarms() {
-    return this.fetchApi('/farms', { method: 'GET' });
-  }
-
-  async getZones(farmId?: string) {
-    return this.fetchApi(`/zones${farmId ? '?farm_id=' + encodeURIComponent(farmId) : ''}`, { method: 'GET' });
-  }
-
-  async getDevices() {
-    return this.fetchApi('/devices', { method: 'GET' });
-  }
+  async getFarms() { return this.fetchApi('/farms', { method: 'GET' }); }
+  async getZones(farmId?: string) { return this.fetchApi(`/zones${farmId ? '?farm_id=' + encodeURIComponent(farmId) : ''}`, { method: 'GET' }); }
+  async getDevices(farmId?: string) { return this.fetchApi(`/devices${farmId ? '?farm_id=' + encodeURIComponent(farmId) : ''}`, { method: 'GET' }); }
 }
 
 export class WeatherClient extends BaseApiClient {
-  async getWeatherAdvice(lat: number = 30.9010, lon: number = 75.8573, crop: string = 'Rice') {
+  async getWeatherAdvice(lat: number, lon: number, crop?: string) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('A valid farm location is required for weather.');
     return this.fetchApi('/api/weather-advice', {
       method: 'POST',
-      body: JSON.stringify({ lat, lon, crop }),
+      body: JSON.stringify({ lat, lon, ...(crop ? { crop } : {}) }),
     });
   }
 }
 
 export class DeviceClient extends BaseApiClient {
   async registerDevice(deviceData: {
-    deviceId: string;
-    farmId: string;
-    fieldId: string;
-    deviceName: string;
-    firmwareVersion?: string;
-    communicationType?: string;
-  }) {
-    return this.fetchApi('/api/device-register', {
-      method: 'POST',
-      body: JSON.stringify(deviceData),
-    });
-  }
-
-  async getLifecycle(deviceId: string = 'ESP32_NODE_01') {
-    return this.fetchApi(`/api/devices/${encodeURIComponent(deviceId)}/lifecycle`, {
-      method: 'GET',
-    });
+    deviceId: string; farmId: string; fieldId: string; deviceName: string; firmwareVersion?: string; communicationType?: string;
+  }) { return this.fetchApi('/api/device-register', { method: 'POST', body: JSON.stringify(deviceData) }); }
+  async getLifecycle(deviceId: string) {
+    if (!deviceId) throw new Error('deviceId is required.');
+    return this.fetchApi(`/api/devices/${encodeURIComponent(deviceId)}/lifecycle`, { method: 'GET' });
   }
 }
 
 export class AIClient extends BaseApiClient {
-  async getHealth() {
-    return this.fetchApi('/api/ai/health', { method: 'GET' });
-  }
-
-  async getStatus() {
-    return this.fetchApi('/api/ai/status', { method: 'GET' });
-  }
-
-  async getModels() {
-    return this.fetchApi('/api/ai/models', { method: 'GET' });
-  }
-
+  async getHealth() { return this.fetchApi('/api/ai/health', { method: 'GET' }); }
+  async getStatus() { return this.fetchApi('/api/ai/status', { method: 'GET' }); }
+  async getModels() { return this.fetchApi('/api/ai/models', { method: 'GET' }); }
   async chat(payload: {
-    message?: string;
-    question?: string;
-    context?: string;
-    language?: string;
-    farm_id?: string;
-    zone_id?: string;
-    include_sensor_context?: boolean;
-    include_weather_context?: boolean;
-    top_k?: number;
-    model?: string;
+    message?: string; question?: string; context?: string; language?: string; farm_id?: string; zone_id?: string;
+    include_sensor_context?: boolean; include_weather_context?: boolean; top_k?: number; model?: string;
   }) {
     const q = payload.message || payload.question || '';
+    if (!q.trim()) throw new Error('AI message is required.');
     return this.fetchApi('/api/ai/chat', {
       method: 'POST',
       body: JSON.stringify({
         message: q,
         question: q,
-        context: payload.context,
+        ...(payload.context ? { context: payload.context } : {}),
         language: payload.language || 'en',
-        farm_id: payload.farm_id || 'farm-alpha',
-        zone_id: payload.zone_id || 'zone-1',
+        ...(payload.farm_id ? { farm_id: payload.farm_id } : {}),
+        ...(payload.zone_id ? { zone_id: payload.zone_id } : {}),
         include_sensor_context: payload.include_sensor_context ?? false,
         include_weather_context: payload.include_weather_context ?? false,
         top_k: payload.top_k ?? 3,
-        model: payload.model,
+        ...(payload.model ? { model: payload.model } : {}),
       }),
     });
   }
-
   async queryRAG(question: string, language: string = 'en', top_k: number = 3) {
-    return this.fetchApi('/api/ai/rag/query', {
-      method: 'POST',
-      body: JSON.stringify({
-        question,
-        language,
-        top_k,
-      }),
-    });
+    return this.fetchApi('/api/ai/rag/query', { method: 'POST', body: JSON.stringify({ question, language, top_k }) });
   }
-
-  async getSources() {
-    return this.fetchApi('/api/ai/rag/sources', { method: 'GET' });
-  }
-
-  async getEvaluation() {
-    return this.fetchApi('/api/ai/evaluation', { method: 'GET' });
-  }
+  async getSources() { return this.fetchApi('/api/ai/rag/sources', { method: 'GET' }); }
+  async getEvaluation() { return this.fetchApi('/api/ai/evaluation', { method: 'GET' }); }
 }
 
 export class IrrigationClient extends BaseApiClient {
-  async assessIrrigation(payload?: {
-    crop?: string;
-    growth_stage?: string;
-    soil_moisture?: number | null;
-    temperature_c?: number | null;
-    humidity_pct?: number | null;
-    rain_probability_pct?: number | null;
-    rain_forecast_mm?: number | null;
+  async assessIrrigation(payload: {
+    crop: string; growth_stage: string; soil_moisture: number | null; temperature_c?: number | null;
+    humidity_pct?: number | null; rain_probability_pct?: number | null; rain_forecast_mm?: number | null;
   }) {
-    return this.fetchApi('/api/irrigation/assess', {
-      method: 'POST',
-      body: JSON.stringify({
-        crop: payload?.crop || 'Rice',
-        growth_stage: payload?.growth_stage || 'Vegetative',
-        soil_moisture: payload?.soil_moisture ?? null,
-        temperature_c: payload?.temperature_c ?? null,
-        humidity_pct: payload?.humidity_pct ?? null,
-        rain_probability_pct: payload?.rain_probability_pct ?? 0,
-        rain_forecast_mm: payload?.rain_forecast_mm ?? 0,
-      }),
-    });
+    return this.fetchApi('/api/irrigation/assess', { method: 'POST', body: JSON.stringify(payload) });
   }
 }
 
-// Export Unified Singleton ApiClient
 export const ApiClient = {
   ai: new AIClient(),
   agent: new AgentClient(),
@@ -353,4 +240,3 @@ export const ApiClient = {
   device: new DeviceClient(),
   weather: new WeatherClient(),
 };
-
