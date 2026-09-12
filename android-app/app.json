@@ -6,6 +6,16 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "AgriSaathi uses your photos so you can upload a crop leaf for analysis.",
+          "cameraPermission": "AgriSaathi uses your camera so you can photograph a crop leaf.",
+          "microphonePermission": false
+        }
+      ]
+    ],
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -22,7 +32,6 @@
       "package": "com.agrisaathi.app",
       "permissions": [
         "CAMERA",
-        "RECORD_AUDIO",
         "INTERNET",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
