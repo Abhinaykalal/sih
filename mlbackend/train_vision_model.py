@@ -1,116 +1,246 @@
-"""
-HIGH-ACCURACY ENSEMBLE VISION AI TRAINING SCRIPT (99.9% ACCURACY GOAL)
-----------------------------------------------------------------------
-Trains a High-Precision Ensemble Classifier (Gradient Boosting + Random Forest + Calibrated Probability Estimator)
-for Crop Disease, Leaf Pathology & Nutrient Deficiency Classification.
+"""Train AgriSaathi's experimental leaf-disease CV model from REAL images.
+
+Expected dataset layout:
+
+    datasets/vision/images/
+        rice__healthy/*.jpg
+        rice__blast/*.jpg
+        rice__brown_spot/*.jpg
+        tomato__early_blight/*.jpg
+        ...
+
+The folder name is the class label. ``crop__disease`` is recommended so crop context
+is explicit in the artifact. For stronger leakage protection, provide
+``datasets/vision/vision_manifest.csv`` with columns ``path,label,group_id``.  Images
+with the same group_id (for example the same plant/session) are kept in one split.
+
+This script deliberately fails if the real image dataset is absent. It never creates
+synthetic training rows and never writes a fake high-accuracy model.
 """
 
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
 import os
+import random
+from pathlib import Path
+from typing import Dict, List, Tuple
+
 import joblib
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+from PIL import Image, ImageOps
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, precision_score, recall_score
+from sklearn.model_selection import GroupShuffleSplit
+from sklearn.svm import LinearSVC
+from skimage.feature import hog
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "vision_model.joblib")
+MODEL_PATH = Path(__file__).with_name("vision_model.joblib")
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "datasets" / "vision" / "images"
+DEFAULT_MANIFEST = Path(__file__).resolve().parents[1] / "datasets" / "vision" / "vision_manifest.csv"
+SEED = 42
+SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
-# High-Precision Feature Vectors: [Greenness, Yellowing, Browning/Lesions, Texture Anomaly, Soil Moisture, Air Humidity]
-X_train = np.array([
-    # Healthy Crops (High green, low yellow/brown, normal soil/humidity)
-    [0.85, 0.05, 0.02, 0.10, 45.0, 60.0],
-    [0.82, 0.08, 0.04, 0.12, 42.0, 58.0],
-    [0.88, 0.04, 0.02, 0.08, 48.0, 65.0],
-    
-    # Water Stress Induced Chlorosis (Low moisture, high yellowing, moderate temp)
-    [0.22, 0.68, 0.10, 0.40, 14.0, 45.0],
-    [0.25, 0.62, 0.12, 0.42, 17.0, 50.0],
-    [0.20, 0.70, 0.08, 0.38, 12.0, 40.0],
-
-    # Fungal Early Blight Spots (High humidity, necrotic brown concentric lesions, high texture variance)
-    [0.18, 0.22, 0.60, 0.82, 35.0, 92.0],
-    [0.15, 0.20, 0.65, 0.85, 38.0, 90.0],
-    [0.20, 0.25, 0.55, 0.78, 32.0, 88.0],
-
-    # Downy Mildew / Rust Fungal Infection (High humidity, mottled yellow/brown surface spores)
-    [0.12, 0.25, 0.68, 0.88, 40.0, 95.0],
-    [0.10, 0.28, 0.65, 0.90, 42.0, 94.0],
-
-    # Nitrogen (N) Deficiency (Uniform pale chlorosis, normal moisture, normal humidity)
-    [0.32, 0.58, 0.08, 0.30, 32.0, 62.0],
-    [0.35, 0.55, 0.06, 0.28, 35.0, 65.0],
-    [0.30, 0.60, 0.09, 0.32, 30.0, 60.0],
-
-    # Potassium (K) Deficiency / Marginal Scorch (Edge browning, yellow interveinal zones)
-    [0.30, 0.35, 0.42, 0.65, 28.0, 60.0],
-    [0.28, 0.38, 0.45, 0.68, 30.0, 58.0],
-
-    # Phosphorus (P) Deficiency (Purplish dark bronzing, stunted texture)
-    [0.40, 0.15, 0.35, 0.50, 30.0, 55.0],
-    [0.38, 0.18, 0.38, 0.52, 32.0, 58.0],
-
-    # Pest / Insect Folivore Infestation (Leaf perforations, ragged margins, high texture entropy)
-    [0.45, 0.15, 0.30, 0.92, 32.0, 70.0],
-    [0.42, 0.18, 0.32, 0.95, 30.0, 72.0]
-])
-
-y_train = [
-    "Healthy Foliage",
-    "Healthy Foliage",
-    "Healthy Foliage",
-    "Water Stress Induced Chlorosis",
-    "Water Stress Induced Chlorosis",
-    "Water Stress Induced Chlorosis",
-    "Tomato Early Blight Fungal Spot",
-    "Tomato Early Blight Fungal Spot",
-    "Tomato Early Blight Fungal Spot",
-    "Downy Mildew Fungal Infection",
-    "Downy Mildew Fungal Infection",
-    "Nitrogen Deficiency Chlorosis",
-    "Nitrogen Deficiency Chlorosis",
-    "Nitrogen Deficiency Chlorosis",
-    "Potassium Marginal Scorch Deficiency",
-    "Potassium Marginal Scorch Deficiency",
-    "Phosphorus Bronze-Purpling Deficiency",
-    "Phosphorus Bronze-Purpling Deficiency",
-    "Insect Foliage Pest Damage",
-    "Insect Foliage Pest Damage"
-]
-
-REMEDIES = {
-    "Healthy Foliage": "Crop foliage is healthy. Maintain standard drip irrigation and scheduled surveillance.",
-    "Water Stress Induced Chlorosis": "Soil moisture critical (<20%). Irrigate Zone 2 immediately. DO NOT apply nitrogen fertilizer.",
-    "Tomato Early Blight Fungal Spot": "Foliar pathogen detected. Apply organic neem oil solution (5ml/L) or Copper Oxychloride @ 2.5g/L.",
-    "Downy Mildew Fungal Infection": "Spore germination under high humidity (>85%). Apply bio-fungicide (Trichoderma viride @ 5g/L) within 24h.",
-    "Nitrogen Deficiency Chlorosis": "General pale yellowing with normal moisture. Apply Urea @ 25-30 kg/acre or organic liquid bio-nitrogen foliar spray.",
-    "Potassium Marginal Scorch Deficiency": "Marginal scorching detected. Apply Muriate of Potash (MOP) @ 20 kg/acre or Potassium Nitrate (13-0-45) foliar spray.",
-    "Phosphorus Bronze-Purpling Deficiency": "Anthocyanin purpling detected. Apply Single Super Phosphate (SSP) or DAP directly to the root zone.",
-    "Insect Foliage Pest Damage": "Active pest feeding observed. Deploy targeted yellow/blue sticky traps and apply Azadirachtin (1500 ppm neem extract)."
+FEATURE_CONFIG = {
+    "image_size": [128, 128],
+    "hog_orientations": 9,
+    "hog_pixels_per_cell": [8, 8],
+    "hog_cells_per_block": [2, 2],
+    "rgb_hist_bins": 16,
 }
 
-def train_high_accuracy_vision_model():
-    print("=" * 60)
-    print("TRAINING AGRISENTINEL 99.9% HIGH-ACCURACY VISION ENSEMBLE AI...")
-    print("=" * 60)
+REMEDIES = {
+    "": "Do not treat from the model result alone. Confirm the diagnosis with a qualified agronomist.",
+}
 
-    rf = RandomForestClassifier(n_estimators=120, random_state=42)
-    gb = GradientBoostingClassifier(n_estimators=120, random_state=42)
 
-    ensemble = VotingClassifier(
-        estimators=[('rf', rf), ('gb', gb)],
-        voting='soft'
-    )
+def set_seed() -> None:
+    random.seed(SEED)
+    np.random.seed(SEED)
 
-    calibrated_model = CalibratedClassifierCV(estimator=ensemble, cv=2)
-    calibrated_model.fit(X_train, y_train)
 
-    packaged = {
-        "model": calibrated_model,
-        "remedies": REMEDIES,
-        "accuracy_metric": "99.9% Calibrated Ensemble Precision",
-        "version": "2.5.0-NutrientPathology-QualcommEdge"
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def extract_features(path: Path) -> np.ndarray:
+    img = Image.open(path).convert("RGB")
+    img = ImageOps.exif_transpose(img).resize(tuple(FEATURE_CONFIG["image_size"]))
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    gray = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+
+    hog_features = hog(
+        gray,
+        orientations=FEATURE_CONFIG["hog_orientations"],
+        pixels_per_cell=tuple(FEATURE_CONFIG["hog_pixels_per_cell"]),
+        cells_per_block=tuple(FEATURE_CONFIG["hog_cells_per_block"]),
+        block_norm="L2-Hys",
+        feature_vector=True,
+    ).astype(np.float32)
+
+    hist_features: List[float] = []
+    bins = int(FEATURE_CONFIG["rgb_hist_bins"])
+    for channel in range(3):
+        hist, _ = np.histogram(arr[..., channel], bins=bins, range=(0.0, 1.0), density=True)
+        hist = hist.astype(np.float32)
+        hist /= max(float(hist.sum()), 1.0)
+        hist_features.extend(hist.tolist())
+
+    return np.concatenate([hog_features, np.asarray(hist_features, dtype=np.float32)])
+
+
+def load_records(data_dir: Path, manifest_path: Path | None) -> List[Dict[str, str]]:
+    records: List[Dict[str, str]] = []
+    if manifest_path and manifest_path.exists():
+        with manifest_path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            required = {"path", "label", "group_id"}
+            if not required.issubset(set(reader.fieldnames or [])):
+                raise ValueError("vision_manifest.csv must contain path,label,group_id")
+            for row in reader:
+                path = Path(row["path"])
+                if not path.is_absolute():
+                    path = data_dir.parent.parent / path
+                if path.suffix.lower() in SUPPORTED_EXTENSIONS and path.exists():
+                    records.append({"path": str(path), "label": row["label"], "group_id": row["group_id"]})
+    else:
+        for class_dir in sorted(p for p in data_dir.iterdir() if p.is_dir()):
+            label = class_dir.name
+            for path in sorted(class_dir.rglob("*")):
+                if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    # Exact-file hash prevents identical files from crossing splits.
+                    # A manifest group_id is still recommended for near-duplicate/session leakage.
+                    records.append({
+                        "path": str(path),
+                        "label": label,
+                        "group_id": sha256_file(path),
+                    })
+
+    if not records:
+        raise RuntimeError(
+            f"No real images found in {data_dir}. Add a labeled image dataset before training."
+        )
+    return records
+
+
+def split_records(records: List[Dict[str, str]]) -> Tuple[List[int], List[int], List[int]]:
+    labels = np.asarray([r["label"] for r in records])
+    groups = np.asarray([r["group_id"] for r in records])
+    indices = np.arange(len(records))
+
+    first = GroupShuffleSplit(n_splits=1, test_size=0.20, random_state=SEED)
+    train_val_idx, test_idx = next(first.split(indices, labels, groups))
+
+    second = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=SEED)
+    train_rel, val_rel = next(second.split(train_val_idx, labels[train_val_idx], groups[train_val_idx]))
+    train_idx = train_val_idx[train_rel]
+    val_idx = train_val_idx[val_rel]
+
+    all_classes = set(labels)
+    for name, split in (("train", train_idx), ("validation", val_idx), ("test", test_idx)):
+        missing = sorted(all_classes - set(labels[split]))
+        if missing:
+            raise RuntimeError(
+                f"{name} split is missing classes {missing}. Add more real images/groups before training."
+            )
+    return train_idx.tolist(), val_idx.tolist(), test_idx.tolist()
+
+
+def evaluate(model, x: np.ndarray, y: np.ndarray) -> Dict[str, float]:
+    pred = model.predict(x)
+    return {
+        "accuracy": round(float(accuracy_score(y, pred)), 6),
+        "balanced_accuracy": round(float(balanced_accuracy_score(y, pred)), 6),
+        "macro_precision": round(float(precision_score(y, pred, average="macro", zero_division=0)), 6),
+        "macro_recall": round(float(recall_score(y, pred, average="macro", zero_division=0)), 6),
+        "macro_f1": round(float(f1_score(y, pred, average="macro", zero_division=0)), 6),
     }
 
-    joblib.dump(packaged, MODEL_PATH)
-    print(f"[SUCCESS] High-Accuracy Vision AI Model trained & saved to: {MODEL_PATH}")
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--output", type=Path, default=MODEL_PATH)
+    args = parser.parse_args()
+
+    set_seed()
+    if not args.data_dir.exists():
+        raise SystemExit(
+            f"REAL DATASET REQUIRED: {args.data_dir} does not exist. Training was not run."
+        )
+
+    manifest = args.manifest if args.manifest.exists() else None
+    records = load_records(args.data_dir, manifest)
+    labels = sorted({r["label"] for r in records})
+    if len(labels) < 2:
+        raise SystemExit("At least two real image classes are required.")
+
+    train_idx, val_idx, test_idx = split_records(records)
+    print(f"Dataset: {len(records)} images / {len(labels)} classes")
+    print(f"Split: train={len(train_idx)}, validation={len(val_idx)}, test={len(test_idx)}")
+
+    cache: Dict[str, np.ndarray] = {}
+    for record in records:
+        path = record["path"]
+        cache[path] = extract_features(Path(path))
+
+    X = np.stack([cache[r["path"]] for r in records])
+    y = np.asarray([r["label"] for r in records])
+
+    # Linear SVM over actual image features, followed by held-out calibration.
+    base = LinearSVC(C=1.0, class_weight="balanced", random_state=SEED, max_iter=10000)
+    calibrated = CalibratedClassifierCV(base, cv=3, method="sigmoid")
+    calibrated.fit(X[train_idx], y[train_idx])
+
+    val_metrics = evaluate(calibrated, X[val_idx], y[val_idx])
+    test_metrics = evaluate(calibrated, X[test_idx], y[test_idx])
+
+    artifact = {
+        "artifact_type": "agrisaathi_vision_hog_svm_v1",
+        "model_name": "AgriSaathi Leaf Disease Vision (HOG + calibrated LinearSVC)",
+        "version": "vision-hog-svm-1.0.0",
+        "model": calibrated,
+        "classes": labels,
+        "feature_config": {**FEATURE_CONFIG, "feature_length": int(X.shape[1])},
+        "dataset": {
+            "root": str(args.data_dir),
+            "manifest": str(manifest) if manifest else None,
+            "image_count": len(records),
+            "class_count": len(labels),
+            "split_strategy": "grouped 80/20 test then 75/25 train/validation; exact-image SHA256 grouping without manifest",
+        },
+        "metrics": {
+            "validation": val_metrics,
+            "test": test_metrics,
+        },
+        "minimum_confidence_pct": 70.0,
+        "remedies": REMEDIES,
+        "training_seed": SEED,
+        "status": "EXPERIMENTAL",
+        "limitations": [
+            "This is a classical CV baseline, not a field-validated clinical/agronomic diagnosis system.",
+            "A manifest with plant/session group_id is required for strong leakage control.",
+            "External field validation on unseen farms/cameras is required before production use.",
+            "Confidence is calibrated on the training workflow but is not a guarantee of field correctness.",
+        ],
+    }
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(artifact, args.output)
+
+    metrics_path = args.output.with_suffix(".metrics.json")
+    metrics_path.write_text(json.dumps(artifact["metrics"], indent=2), encoding="utf-8")
+    print(json.dumps(artifact["metrics"], indent=2))
+    print(f"Saved REAL-IMAGE vision artifact: {args.output}")
+
 
 if __name__ == "__main__":
-    train_high_accuracy_vision_model()
+    main()
