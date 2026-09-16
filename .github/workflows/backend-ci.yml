@@ -1,0 +1,32 @@
+name: AgriSaathi backend CI
+
+on:
+  push:
+    branches: [main, fix/agrisaathi-forensic-repair]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile backend
+        run: python -m compileall -q mlbackend
+      - name: Run repair contract tests
+        env:
+          ENFORCE_JWT_AUTH: "false"
+          DEV_MODE: "true"
+          DEV_ALLOW_INSECURE_AUTH: "true"
+        run: pytest -q mlbackend/tests/test_repair_contracts.py
