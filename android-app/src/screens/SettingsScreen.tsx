@@ -11,8 +11,10 @@ import {
 import { theme } from '../styles/theme';
 import { getBackendBaseUrl, setBackendBaseUrl } from '../services/ApiClient';
 import { OfflineStore } from '../services/OfflineStore';
+import { loadFarmContext, getFarmContextSync, FarmProfile, FarmDevice } from '../services/FarmContext';
 
 export function SettingsScreen() {
+  const [farmProfile, setFarmProfile] = useState<FarmProfile>(getFarmContextSync());
   const [apiUrl, setApiUrl] = useState('');
   const [testing, setTesting] = useState(false);
   const [connStatus, setConnStatus] = useState<string | null>(null);
@@ -28,6 +30,10 @@ export function SettingsScreen() {
     setApiUrl(url);
     const actions = await OfflineStore.getQueuedActions();
     setQueuedCount(actions.length);
+    try {
+      const profile = await loadFarmContext();
+      setFarmProfile(profile);
+    } catch {}
   };
 
   const handleSaveAndTest = async () => {
@@ -75,15 +81,22 @@ export function SettingsScreen() {
       {/* Farmer Profile Card */}
       <View style={styles.profileCard}>
         <View style={styles.profileAvatar}>
-          <Text style={styles.avatarText}>RP</Text>
+          <Text style={styles.avatarText}>
+            {(farmProfile.owner_name || 'U').substring(0, 2).toUpperCase()}
+          </Text>
         </View>
         <View style={{ flex: 1, marginLeft: 14 }}>
-          <Text style={styles.profileName}>Ramesh Patel</Text>
-          <Text style={styles.profileFarm}>Green Valley Farm • Ludhiana, Punjab</Text>
-          <Text style={styles.profileRole}>Primary Operator • 12.5 Acres</Text>
+          <Text style={styles.profileName}>{farmProfile.owner_name || 'Not configured'}</Text>
+          <Text style={styles.profileFarm}>
+            {farmProfile.farm_name}{farmProfile.location_name && farmProfile.location_name !== 'Location not configured' ? ` • ${farmProfile.location_name}` : ''}
+          </Text>
+          <Text style={styles.profileRole}>
+            {farmProfile.owner_role || 'Operator'}
+            {farmProfile.area_acres ? ` • ${farmProfile.area_acres} Acres` : ''}
+          </Text>
         </View>
         <View style={styles.activeTag}>
-          <Text style={styles.activeTagText}>VERIFIED</Text>
+          <Text style={styles.activeTagText}>{farmProfile.farm_id ? 'CONNECTED' : 'OFFLINE'}</Text>
         </View>
       </View>
 
@@ -164,23 +177,29 @@ export function SettingsScreen() {
       {/* Hardware Nodes Overview */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Connected Hardware Nodes</Text>
-        <View style={styles.nodeItem}>
-          <View style={styles.statusDotGreen} />
-          <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={styles.nodeTitle}>ESP32 Field Node 01 (Zone 1)</Text>
-            <Text style={styles.nodeMeta}>Firmware v2.4.1 • Moisture, NPK, Temp • RSSI -62dBm</Text>
+        {farmProfile.devices.length > 0 ? (
+          farmProfile.devices.map((device: FarmDevice, idx: number) => (
+            <View key={device.device_id || idx} style={[styles.nodeItem, idx === farmProfile.devices.length - 1 && { borderBottomWidth: 0 }]}>
+              <View style={styles.statusDotGreen} />
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={styles.nodeTitle}>{device.device_name || device.device_id}</Text>
+                <Text style={styles.nodeMeta}>
+                  {device.firmware_version ? `Firmware ${device.firmware_version}` : 'Firmware N/A'}
+                  {device.communication_type ? ` • ${device.communication_type}` : ''}
+                </Text>
+              </View>
+              <Text style={styles.nodeStatusText}>{(device.status || 'UNKNOWN').toUpperCase()}</Text>
+            </View>
+          ))
+        ) : (
+          <View style={styles.nodeItem}>
+            <View style={[styles.statusDotGreen, { backgroundColor: '#94A3B8' }]} />
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={styles.nodeTitle}>No devices registered</Text>
+              <Text style={styles.nodeMeta}>Connect a device or register one via the provisioning screen.</Text>
+            </View>
           </View>
-          <Text style={styles.nodeStatusText}>ONLINE</Text>
-        </View>
-
-        <View style={[styles.nodeItem, { borderBottomWidth: 0 }]}>
-          <View style={styles.statusDotGreen} />
-          <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={styles.nodeTitle}>Qualcomm Robotics RB5 Gateway</Text>
-            <Text style={styles.nodeMeta}>Edge AI Engine • SNPE ONNX Runtime • RSSI -48dBm</Text>
-          </View>
-          <Text style={styles.nodeStatusText}>ONLINE</Text>
-        </View>
+        )}
       </View>
     </ScrollView>
   );

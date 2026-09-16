@@ -10,6 +10,7 @@ import {
 import { theme } from '../styles/theme';
 import { ApiClient } from '../services/ApiClient';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
+import { getFarmContextSync, loadFarmContext, FarmProfile } from '../services/FarmContext';
 
 interface DecisionData {
   determination: string;
@@ -26,20 +27,33 @@ interface DecisionData {
 }
 
 export function DecisionScreen() {
+  const [farmProfile, setFarmProfile] = useState<FarmProfile>(getFarmContextSync());
   const [loading, setLoading] = useState(true);
   const [decision, setDecision] = useState<DecisionData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    evaluateDecisions();
+    initAndEvaluate();
   }, []);
 
-  const evaluateDecisions = async () => {
+  const initAndEvaluate = async () => {
+    try {
+      const profile = await loadFarmContext();
+      setFarmProfile(profile);
+      await evaluateDecisions(profile);
+    } catch {
+      await evaluateDecisions(farmProfile);
+    }
+  };
+
+  const evaluateDecisions = async (profile?: FarmProfile) => {
+    const ctx = profile || farmProfile;
     setLoading(true);
     setError(null);
     try {
       // 1. Fetch live telemetry
-      const telRes = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 1);
+      const deviceId = ctx.primary_device_id || 'ESP32_NODE_01';
+      const telRes = await ApiClient.sensor.getTelemetry(deviceId, 1);
       const telemetry = Array.isArray(telRes)
         ? telRes[0]
         : (telRes?.history && telRes.history.length > 0
@@ -58,11 +72,15 @@ export function DecisionScreen() {
       let rainMm = 0;
       let weatherStatus = 'NORMAL';
       try {
-        const weather = await ApiClient.weather.getWeatherAdvice(30.9010, 75.8573, 'Rice');
-        if (weather) {
-          rainProb = weather.rain_probability_pct ?? 0;
-          rainMm = weather.rainfall_mm ?? 0;
-          weatherStatus = weather.weather_status || 'CLEAR';
+        if (ctx.lat && ctx.lon) {
+          const weather = await ApiClient.weather.getWeatherAdvice(
+            ctx.lat, ctx.lon, ctx.active_crop || undefined
+          );
+          if (weather) {
+            rainProb = weather.rain_probability_pct ?? 0;
+            rainMm = weather.rainfall_mm ?? 0;
+            weatherStatus = weather.weather_status || 'CLEAR';
+          }
         }
       } catch {
         // Fallback weather
@@ -72,8 +90,8 @@ export function DecisionScreen() {
       let irriAdvice: any = null;
       try {
         irriAdvice = await ApiClient.irrigation.assessIrrigation({
-          crop: 'Rice',
-          growth_stage: 'Vegetative',
+          crop: ctx.active_crop || 'General',
+          growth_stage: ctx.active_growth_stage || 'Vegetative',
           soil_moisture: moisture,
           temperature_c: tempC,
           humidity_pct: humidity,
@@ -131,7 +149,7 @@ export function DecisionScreen() {
           source: 'RULE_BASED',
           icon: '📐',
           details: [
-            'Target Crop: Rice (PR-126) • Stage: Vegetative',
+            `Target Crop: ${ctx.active_crop || 'Not configured'} • Stage: ${ctx.active_growth_stage || 'Not set'}`,
             `Advisory: ${irriAdvice?.recommendation || irriAdvice?.action || 'Evaluate soil water balance'}`,
             `Safety Band: 40.0%–60.0% (Vegetative shallow water / AWD)`,
           ],
@@ -193,7 +211,7 @@ export function DecisionScreen() {
         <View style={styles.errorBox}>
           <Text style={styles.errorTitle}>Decision Engine Notice</Text>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={evaluateDecisions}>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => evaluateDecisions()}>
             <Text style={styles.retryBtnText}>Retry Evaluation ↻</Text>
           </TouchableOpacity>
         </View>
@@ -215,7 +233,7 @@ export function DecisionScreen() {
           {/* Pipeline Stage Cards */}
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionHeader}>Verification & Inference Pipeline</Text>
-            <TouchableOpacity onPress={evaluateDecisions} disabled={loading}>
+            <TouchableOpacity onPress={() => evaluateDecisions()} disabled={loading}>
               <Text style={styles.reEvalText}>Re-Evaluate ↻</Text>
             </TouchableOpacity>
           </View>

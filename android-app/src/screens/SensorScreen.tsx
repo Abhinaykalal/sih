@@ -12,6 +12,7 @@ import {
 import { theme } from '../styles/theme';
 import { ApiClient } from '../services/ApiClient';
 import { OfflineStore } from '../services/OfflineStore';
+import { loadFarmContext, getFarmContextSync, getZoneNames, FarmProfile } from '../services/FarmContext';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
 interface SensorScreenProps {
@@ -42,7 +43,8 @@ interface TelemetryData {
 }
 
 export function SensorScreen({ onNavigate }: SensorScreenProps) {
-  const [selectedZone, setSelectedZone] = useState('Zone 1 (Paddy Field)');
+  const [farmProfile, setFarmProfile] = useState<FarmProfile>(getFarmContextSync());
+  const [selectedZone, setSelectedZone] = useState('');
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
   const [weatherData, setWeatherData] = useState<any>(null);
   const [pumpStatus, setPumpStatus] = useState<string>('OFF');
@@ -50,16 +52,34 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
+  const [liveAlerts, setLiveAlerts] = useState<any[]>([]);
 
   useEffect(() => {
-    loadDashboardData();
+    initFarmContext();
+  }, []);
+
+  useEffect(() => {
+    if (selectedZone || farmProfile.farm_id) loadDashboardData();
   }, [selectedZone]);
+
+  const initFarmContext = async () => {
+    try {
+      const profile = await loadFarmContext();
+      setFarmProfile(profile);
+      const zones = getZoneNames(profile);
+      if (zones.length > 0 && !selectedZone) setSelectedZone(zones[0]);
+    } catch {
+      const zones = getZoneNames(farmProfile);
+      if (zones.length > 0 && !selectedZone) setSelectedZone(zones[0]);
+    }
+  };
 
   const loadDashboardData = async () => {
     setLoading(true);
     try {
       // 1. Fetch sensor telemetry from live backend
-      const telRes = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 1);
+      const deviceId = farmProfile.primary_device_id || 'ESP32_NODE_01';
+      const telRes = await ApiClient.sensor.getTelemetry(deviceId, 1);
       const latest = Array.isArray(telRes)
         ? telRes[0]
         : (telRes?.history && telRes.history.length > 0
@@ -69,7 +89,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       // 2. Fetch live pump state
       let currentPump = 'OFF';
       try {
-        const pRes = await ApiClient.pump.getPumpState('ESP32_NODE_01');
+        const pRes = await ApiClient.pump.getPumpState(deviceId);
         if (pRes?.state?.reported_state) {
           currentPump = pRes.state.reported_state;
         }
@@ -84,13 +104,27 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       // 3. Fetch live weather advice
       let liveWeather: any = null;
       try {
-        const wRes = await ApiClient.weather.getWeatherAdvice(30.9010, 75.8573, 'Rice');
-        if (wRes) {
-          liveWeather = wRes;
-          setWeatherData(wRes);
+        if (farmProfile.lat && farmProfile.lon) {
+          const wRes = await ApiClient.weather.getWeatherAdvice(
+            farmProfile.lat, farmProfile.lon, farmProfile.active_crop || undefined
+          );
+          if (wRes) {
+            liveWeather = wRes;
+            setWeatherData(wRes);
+          }
         }
       } catch (wErr) {
         // Weather unavailable
+      }
+
+      // Fetch live alerts
+      try {
+        const alertsRes = await ApiClient.notifications.getNotifications({ limit: 3, unread_only: true });
+        if (alertsRes?.notifications) {
+          setLiveAlerts(alertsRes.notifications.slice(0, 3));
+        }
+      } catch {
+        // Alerts unavailable
       }
 
       if (latest && (latest.soil_moisture_pct !== undefined || latest.soil_moisture !== undefined || latest.temperature_c !== undefined)) {
@@ -188,14 +222,14 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       {/* 1. Farm & Zone Selector (Horizontal Scroll with no clipping) */}
       <View style={styles.farmHeader}>
         <View>
-          <Text style={styles.farmTitle}>AgriSaathi Farm Portal</Text>
-          <Text style={styles.farmSubtitle}>Ludhiana Agronomy Cluster • Field #04</Text>
+          <Text style={styles.farmTitle}>{farmProfile.farm_name || 'AgriSaathi Farm'}</Text>
+          <Text style={styles.farmSubtitle}>{farmProfile.location_name || 'Connect to backend to load farm info'}</Text>
         </View>
         <ProvenanceBadge source={telemetry?.provenance || 'LIVE_SENSOR'} />
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.zoneScroll} contentContainerStyle={styles.zoneScrollContent}>
-        {['Zone 1 (Paddy Field)', 'Zone 2 (Wheat Canopy)', 'Zone 3 (Polyhouse)', 'Zone 4 (Orchard)'].map((zone) => (
+        {getZoneNames(farmProfile).map((zone) => (
           <TouchableOpacity
             key={zone}
             style={[styles.zoneChip, selectedZone === zone && styles.zoneChipActive]}
@@ -216,6 +250,31 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
           </Text>
         </View>
       )}
+
+      {/* AI Chatbot Assistant Dashboard Banner */}
+      <TouchableOpacity
+        style={styles.aiChatBanner}
+        onPress={() => onNavigate?.('chat')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.aiChatIconContainer}>
+          <Text style={styles.aiChatIconEmoji}>🤖</Text>
+        </View>
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={styles.aiChatTitle}>Ask AgriSaathi AI</Text>
+            <View style={styles.aiChatBadge}>
+              <Text style={styles.aiChatBadgeText}>24/7 ADVISOR</Text>
+            </View>
+          </View>
+          <Text style={styles.aiChatSub}>
+            Ask questions about soil NPK, crop diseases, fertilizer, or irrigation
+          </Text>
+        </View>
+        <View style={styles.aiChatArrowBtn}>
+          <Text style={styles.aiChatArrowText}>💬</Text>
+        </View>
+      </TouchableOpacity>
 
       {/* 2. Safety Status & Rain Lockout Banner */}
       {telemetry?.lockout_active ? (
@@ -396,14 +455,26 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.alertItem}>
-          <View style={styles.alertDotAmber} />
-          <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={styles.alertItemTitle}>Rain forecast in 24 hours</Text>
-            <Text style={styles.alertItemSub}>Irrigation lock enabled to conserve power and water.</Text>
+        {liveAlerts.length > 0 ? (
+          liveAlerts.map((alert: any, idx: number) => (
+            <View key={alert.id || idx} style={[styles.alertItem, idx > 0 && { marginTop: 8 }]}>
+              <View style={styles.alertDotAmber} />
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={styles.alertItemTitle}>{alert.title || 'Alert'}</Text>
+                <Text style={styles.alertItemSub}>{alert.message || ''}</Text>
+              </View>
+              <ProvenanceBadge source={alert.provenance || 'RULE_BASED'} size="small" />
+            </View>
+          ))
+        ) : (
+          <View style={styles.alertItem}>
+            <View style={[styles.alertDotAmber, { backgroundColor: '#22C55E' }]} />
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={styles.alertItemTitle}>No active alerts</Text>
+              <Text style={styles.alertItemSub}>All systems operating normally.</Text>
+            </View>
           </View>
-          <ProvenanceBadge source="RULE_BASED" size="small" />
-        </View>
+        )}
       </View>
 
       {/* 9. Soil Nutrient Insights (NPK) */}
@@ -865,5 +936,69 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 2,
     textAlign: 'center',
+  },
+  aiChatBanner: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  aiChatIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  aiChatIconEmoji: {
+    fontSize: 22,
+  },
+  aiChatTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  aiChatBadge: {
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  aiChatBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  aiChatSub: {
+    fontSize: 11,
+    color: '#4B5563',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  aiChatArrowBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  aiChatArrowText: {
+    fontSize: 16,
+    color: '#15803D',
   },
 });

@@ -13,8 +13,10 @@ import {
 import { theme } from '../styles/theme';
 import { ApiClient } from '../services/ApiClient';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
+import { getFarmContextSync, loadFarmContext, FarmProfile } from '../services/FarmContext';
 
 export function PumpControlScreen() {
+  const [farmProfile, setFarmProfile] = useState<FarmProfile>(getFarmContextSync());
   const [pumpStateData, setPumpStateData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [overrideModalVisible, setOverrideModalVisible] = useState(false);
@@ -23,21 +25,31 @@ export function PumpControlScreen() {
   const [overrideDurationMin, setOverrideDurationMin] = useState('10');
   const [currentLifecycleStage, setCurrentLifecycleStage] = useState<'IDLE' | 'REQUESTED' | 'PUBLISHED' | 'ACKNOWLEDGED' | 'EXECUTED' | 'BLOCKED'>('IDLE');
   const [commandHistory, setCommandHistory] = useState<any[]>([]);
+  const [liveRainProb, setLiveRainProb] = useState<number | null>(null);
 
   useEffect(() => {
-    loadPumpState();
+    initAndLoad();
   }, []);
 
-  const loadPumpState = async () => {
+  const initAndLoad = async () => {
     try {
-      const res = await ApiClient.pump.getPumpState('ESP32_NODE_01');
+      const profile = await loadFarmContext();
+      setFarmProfile(profile);
+    } catch {}
+    loadPumpState();
+  };
+
+  const loadPumpState = async () => {
+    const deviceId = farmProfile.primary_device_id || 'ESP32_NODE_01';
+    try {
+      const res = await ApiClient.pump.getPumpState(deviceId);
       if (res && res.state) {
         setPumpStateData(res.state);
         if (res.state.command_state === 'EXECUTED' && res.state.reported_state === 'ON') {
           setCurrentLifecycleStage('EXECUTED');
         }
       }
-      const histRes = await ApiClient.pump.getCommands('ESP32_NODE_01');
+      const histRes = await ApiClient.pump.getCommands(deviceId);
       if (histRes && histRes.history) {
         setCommandHistory(histRes.history);
       }
@@ -56,18 +68,23 @@ export function PumpControlScreen() {
       let rainProb = 0;
       let rainMm = 0;
       try {
-        const weather = await ApiClient.weather.getWeatherAdvice(30.9010, 75.8573, 'Rice');
-        if (weather) {
-          rainProb = weather.rain_probability_pct ?? 0;
-          rainMm = weather.rainfall_mm ?? 0;
-          activeRain = weather.weather_status === 'RAIN' || rainMm > 1.0;
+        if (farmProfile.lat && farmProfile.lon) {
+          const weather = await ApiClient.weather.getWeatherAdvice(
+            farmProfile.lat, farmProfile.lon, farmProfile.active_crop || undefined
+          );
+          if (weather) {
+            rainProb = weather.rain_probability_pct ?? 0;
+            rainMm = weather.rainfall_mm ?? 0;
+            activeRain = weather.weather_status === 'RAIN' || rainMm > 1.0;
+            setLiveRainProb(rainProb);
+          }
         }
       } catch {
         // Fallback to telemetry if weather API unreachable
       }
 
       const res = await ApiClient.pump.dispatchCommand({
-        deviceId: 'ESP32_NODE_01',
+        deviceId: farmProfile.primary_device_id || 'ESP32_NODE_01',
         commandType: 'PUMP_ON',
         durationSec: parseInt(overrideDurationMin, 10) * 60 || 300,
         reason: manualOverrideActive ? `OVERRIDE: ${overrideReason}` : 'Farmer initiated soil moisture replenishment',
@@ -113,7 +130,7 @@ export function PumpControlScreen() {
     setCurrentLifecycleStage('REQUESTED');
     try {
       await ApiClient.pump.dispatchCommand({
-        deviceId: 'ESP32_NODE_01',
+        deviceId: farmProfile.primary_device_id || 'ESP32_NODE_01',
         commandType: 'PUMP_OFF',
         durationSec: 0,
         reason: 'Farmer stopped pump manually from mobile app',
@@ -216,10 +233,15 @@ export function PumpControlScreen() {
         <View style={styles.lockoutBar}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <View style={styles.lockoutDot} />
-            <Text style={styles.lockoutBarTitle}>Rain Lockout Interlock: ACTIVE (85% Rain Forecast)</Text>
+            <Text style={styles.lockoutBarTitle}>
+              Rain Lockout Interlock: {liveRainProb != null && liveRainProb >= 50 ? 'ACTIVE' : 'INACTIVE'}
+              {liveRainProb != null ? ` (${liveRainProb}% Rain Forecast)` : ''}
+            </Text>
           </View>
           <Text style={styles.lockoutBarSub}>
-            Standard activation blocked to avert waterlogging & waste.
+            {liveRainProb != null && liveRainProb >= 50
+              ? 'Standard activation blocked to avert waterlogging & waste.'
+              : 'No rain lockout active. Pump operations permitted.'}
           </Text>
         </View>
 

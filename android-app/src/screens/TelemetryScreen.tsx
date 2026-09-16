@@ -12,6 +12,7 @@ import Svg, { Path, Defs, LinearGradient, Stop, Line, Circle } from 'react-nativ
 import { theme } from '../styles/theme';
 import { ApiClient } from '../services/ApiClient';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
+import { getFarmContextSync } from '../services/FarmContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width - 32;
 
@@ -27,7 +28,8 @@ export function TelemetryScreen() {
   const loadTelemetry = async () => {
     setLoading(true);
     try {
-      const res = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 20);
+      const deviceId = getFarmContextSync().primary_device_id || 'ESP32_NODE_01';
+      const res = await ApiClient.sensor.getTelemetry(deviceId, 20);
       if (res && res.history && Array.isArray(res.history)) {
         setHistory([...res.history].reverse());
       } else {

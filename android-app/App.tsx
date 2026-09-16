@@ -111,6 +111,16 @@ export default function App() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          style={[styles.tabItem, activeScreen === 'chat' && styles.tabItemActive]}
+          onPress={() => setActiveScreen('chat')}
+        >
+          <Text style={styles.tabIcon}>💬</Text>
+          <Text style={[styles.tabLabel, activeScreen === 'chat' && styles.tabLabelActive]}>
+            AI Chat
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={[styles.tabItem, activeScreen === 'crop' && styles.tabItemActive]}
           onPress={() => setActiveScreen('crop')}
         >

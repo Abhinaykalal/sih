@@ -12,6 +12,7 @@ import {
 import { theme } from '../styles/theme';
 import { ApiClient } from '../services/ApiClient';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
+import { getFarmContextSync } from '../services/FarmContext';
 
 interface AlternativeCropItem {
   crop: string;
@@ -35,13 +36,13 @@ interface CropResultData {
 
 export function CropRecommendationScreen() {
   // Input parameters
-  const [n, setN] = useState('90');
-  const [p, setP] = useState('42');
-  const [k, setK] = useState('43');
-  const [temp, setTemp] = useState('26.8');
-  const [humidity, setHumidity] = useState('68.4');
-  const [ph, setPh] = useState('6.5');
-  const [rainfall, setRainfall] = useState('180');
+  const [n, setN] = useState('');
+  const [p, setP] = useState('');
+  const [k, setK] = useState('');
+  const [temp, setTemp] = useState('');
+  const [humidity, setHumidity] = useState('');
+  const [ph, setPh] = useState('');
+  const [rainfall, setRainfall] = useState('');
 
   // UI state
   const [loading, setLoading] = useState(false);
@@ -56,7 +57,8 @@ export function CropRecommendationScreen() {
     setFetchingTelemetry(true);
     setErrorMsg(null);
     try {
-      const res = await ApiClient.sensor.getTelemetry('ESP32_NODE_01', 1);
+      const deviceId = getFarmContextSync().primary_device_id || 'ESP32_NODE_01';
+      const res = await ApiClient.sensor.getTelemetry(deviceId, 1);
       const latest = Array.isArray(res)
         ? res[0]
         : (res?.history && res.history.length > 0
@@ -81,13 +83,13 @@ export function CropRecommendationScreen() {
   };
 
   const resetDefaults = () => {
-    setN('90');
-    setP('42');
-    setK('43');
-    setTemp('26.8');
-    setHumidity('68.4');
-    setPh('6.5');
-    setRainfall('180');
+    setN('');
+    setP('');
+    setK('');
+    setTemp('');
+    setHumidity('');
+    setPh('');
+    setRainfall('');
     setTelemetryPrefilled(false);
     setErrorMsg(null);
   };
@@ -156,10 +158,8 @@ export function CropRecommendationScreen() {
     }
   };
 
-  // Run initial prediction on mount
-  useEffect(() => {
-    runRecommendation();
-  }, []);
+  // Don't auto-run on mount — let user fill values or sync from sensors
+  // useEffect(() => { runRecommendation(); }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>

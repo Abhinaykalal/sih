@@ -1,16 +1,16 @@
 {
   "validation": {
-    "accuracy": 0.560102,
-    "balanced_accuracy": 0.553541,
-    "macro_precision": 0.554995,
-    "macro_recall": 0.553541,
-    "macro_f1": 0.542484
+    "accuracy": 0.446667,
+    "balanced_accuracy": 0.463549,
+    "macro_precision": 0.444318,
+    "macro_recall": 0.463549,
+    "macro_f1": 0.436839
   },
   "test": {
-    "accuracy": 0.580563,
-    "balanced_accuracy": 0.59123,
-    "macro_precision": 0.592646,
-    "macro_recall": 0.59123,
-    "macro_f1": 0.574401
+    "accuracy": 0.526667,
+    "balanced_accuracy": 0.532861,
+    "macro_precision": 0.509124,
+    "macro_recall": 0.532861,
+    "macro_f1": 0.495846
   }
 }

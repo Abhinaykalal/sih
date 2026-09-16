@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { ApiClient } from '../services/ApiClient';
 import { OfflineStore } from '../services/OfflineStore';
+import { getFarmContextSync } from '../services/FarmContext';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
 export interface CitationItem {
@@ -108,11 +109,12 @@ export function ChatScreen() {
     setLoading(true);
 
     try {
+      const profile = getFarmContextSync();
       const response = await ApiClient.ai.chat({
         question: textToSend,
         language: selectedLanguage,
-        farm_id: 'farm-alpha',
-        zone_id: 'zone-1',
+        ...(profile.farm_id ? { farm_id: profile.farm_id } : {}),
+        ...(profile.zones[0]?.id ? { zone_id: profile.zones[0].id } : {}),
         include_sensor_context: true,
         include_weather_context: true,
         top_k: 3

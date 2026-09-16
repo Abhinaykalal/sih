@@ -10,12 +10,14 @@ import {
   SafeAreaView
 } from 'react-native';
 import { ApiClient } from '../services/ApiClient';
+import { getFarmContextSync } from '../services/FarmContext';
 
 export function ProvisioningScreen() {
-  const [deviceId, setDeviceId] = useState('ESP32_NODE_01');
-  const [deviceName, setDeviceName] = useState('Field Sensor Node 1');
-  const [farmId, setFarmId] = useState('farm-alpha');
-  const [fieldId, setFieldId] = useState('field-rice-01');
+  const profile = getFarmContextSync();
+  const [deviceId, setDeviceId] = useState(profile.primary_device_id || 'ESP32_NODE_01');
+  const [deviceName, setDeviceName] = useState(profile.devices[0]?.device_name || 'Field Sensor Node 1');
+  const [farmId, setFarmId] = useState(profile.farm_id || '');
+  const [fieldId, setFieldId] = useState(profile.zones[0]?.id || '');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
