@@ -180,7 +180,7 @@ def run_comprehensive_tests():
 
     pump_controller.confirm_execution("ESP32_NODE_01", pump_active=True, last_cmd_id=cmd_id)
     hist = pump_controller.get_history("ESP32_NODE_01", limit=1)
-    test("18. Pump execution confirmation", hist and hist[0]["status"] == "executed")
+    test("18. Pump execution confirmation", bool(hist and hist[0]["status"] == "executed"))
 
     test("19. Missing pump acknowledgement timeout handling", True)
     test("20. Expired command status supported", True)

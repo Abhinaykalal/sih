@@ -13,7 +13,7 @@ Enforces physical sensor validation ranges (soil moisture 0-100%, ADC 0-4095, et
 import json
 import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Union
 
 try:
     from .config import settings
@@ -25,14 +25,14 @@ _latest_telemetry: Dict[str, Dict[str, Any]] = {}
 _device_lifecycle: Dict[str, Dict[str, Any]] = {}
 _command_history: List[Dict[str, Any]] = []
 
-def parse_and_validate_telemetry_payload(raw_json_str: str) -> Tuple[bool, Optional[Dict[str, Any]], List[str]]:
+def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]) -> Tuple[bool, Optional[Dict[str, Any]], List[str]]:
     """
     Parses and validates an inbound ESP32 telemetry packet.
     Missing fields remain None. Zero is preserved as 0.
     """
     errors = []
     try:
-        data = json.loads(raw_json_str) if isinstance(raw_json_str, str) else raw_json_str
+        data = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
     except Exception as e:
         return False, None, [f"JSON parse failure: {str(e)}"]
 

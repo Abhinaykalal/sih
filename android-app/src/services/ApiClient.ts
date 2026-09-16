@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_URL_STORAGE_KEY = '@agrisaathi_api_url';
 export const AUTH_TOKEN_STORAGE_KEY = '@agrisaathi_auth_token';
-export const DEFAULT_API_URL = 'https://agrisaathi-6dg1.onrender.com';
+export const DEFAULT_API_URL = 'https://wan-reminder-misc-lesson.trycloudflare.com';
 
 export async function getBackendBaseUrl(): Promise<string> {
   try {

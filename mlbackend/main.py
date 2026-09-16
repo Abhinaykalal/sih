@@ -2222,17 +2222,55 @@ def api_ai_chat(
         )
     except OllamaServiceException as e:
         latency = round((time.perf_counter() - t0) * 1000, 2)
-        logger.error(f"[{req_id}] OllamaServiceException ({e.error_code}): {e.message} (latency: {latency}ms)")
-        raise HTTPException(
-            status_code=e.status_code,
-            detail={
-                "error_code": e.error_code,
-                "message": e.message,
-                "provider": "ollama",
-                "model": target_model,
-                "request_id": req_id
-            }
-        )
+        err_code = getattr(e, "error_code", "OLLAMA_UNAVAILABLE")
+        err_msg = getattr(e, "message", str(e))
+        err_status = getattr(e, "status_code", 503)
+        logger.warning(f"[{req_id}] Ollama unavailable or model missing ({err_code}): {err_msg}. Falling back to grounded RAG knowledge synthesis.")
+        try:
+            from agent_orchestrator import agent_orchestrator as orch
+            if orch:
+                res = orch.process(
+                    query=query,
+                    crop="Rice",
+                    stage="Vegetative",
+                    field_id="zone-1-north-field",
+                    include_sensor=req.include_sensor_context,
+                    include_weather=req.include_weather_context,
+                    user_id="anonymous"
+                )
+                citations = [{"source": ev.title, "relevance": ev.confidence} for ev in res.evidence] if res.evidence else []
+                return AIChatResponse(
+                    response=res.answer,
+                    answer=res.answer,
+                    model="rag-hybrid-knowledge",
+                    model_name="rag-hybrid-knowledge",
+                    provider="RAG_HYBRID",
+                    status="GENERATED",
+                    provenance="SOURCE_BACKED_KNOWLEDGE",
+                    citations=citations,
+                    retrieved_chunks=len(citations),
+                    request_id=req_id,
+                    generated_at=now_iso,
+                    latency_ms=latency,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    sensor_context=sensor_ctx,
+                    weather_context=weather_ctx,
+                    warnings=[f"Ollama model '{target_model}' not found in cloud; served via grounded RAG knowledge engine."]
+                )
+            raise RuntimeError("Agent orchestrator not available")
+        except Exception as fallback_err:
+            logger.error(f"[{req_id}] Fallback generation failed: {fallback_err}")
+            raise HTTPException(
+                status_code=err_status,
+                detail={
+                    "error_code": err_code,
+                    "message": err_msg,
+                    "provider": "ollama",
+                    "model": target_model,
+                    "request_id": req_id
+                }
+            )
     except Exception as e:
         latency = round((time.perf_counter() - t0) * 1000, 2)
         logger.error(f"[{req_id}] Unexpected error in AI chat: {e} (latency: {latency}ms)")
