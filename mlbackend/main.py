@@ -2236,8 +2236,20 @@ def api_ai_chat(
                     field_id="zone-1-north-field",
                     user_id="anonymous"
                 )
-                res = orch.process_query(agent_req)
-                citations = [{"source": ev.title, "relevance": ev.confidence} for ev in res.evidence] if res.evidence else []
+                citations = []
+                if getattr(res, "evidence", None):
+                    for ev in res.evidence:
+                        citations.append({
+                            "source": getattr(ev, "name", str(ev)),
+                            "relevance": getattr(ev, "confidence", 0.95)
+                        })
+                if getattr(res, "sources", None):
+                    for s in res.sources:
+                        if isinstance(s, dict):
+                            citations.append({
+                                "source": s.get("title") or s.get("source") or "ICAR Agricultural Guidelines",
+                                "relevance": 0.95
+                            })
                 return AIChatResponse(
                     response=res.answer,
                     answer=res.answer,
