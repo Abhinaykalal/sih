@@ -132,7 +132,7 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
         "raw_payload": data,
         "ingestion_status": "VALID" if not errors else "INVALID",
         "validation_errors": errors,
-        "data_source": data.get("data_source", "MQTT_EDGE"),
+        "data_source": data.get("data_source", "REAL"),
     }
     return not errors, record, errors
 
@@ -180,8 +180,11 @@ class MQTTServiceManager:
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         self.connected = int(reason_code) == 0
         if self.connected:
-            client.subscribe(self.uplink_topic)
-            client.subscribe(self.status_topic)
+            # Configured topics may contain {device_id}; subscribe to one-level wildcards.
+            telemetry_topic = self.uplink_topic.replace("{device_id}", "+")
+            status_topic = self.status_topic.replace("{device_id}", "+")
+            client.subscribe(telemetry_topic, qos=1)
+            client.subscribe(status_topic, qos=1)
 
     def _on_message(self, client, userdata, message):
         payload = message.payload.decode("utf-8", errors="replace")
