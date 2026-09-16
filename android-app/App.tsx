@@ -10,7 +10,6 @@ import {
 import { theme } from './src/styles/theme';
 import { SensorScreen } from './src/screens/SensorScreen';
 import { CropRecommendationScreen } from './src/screens/CropRecommendationScreen';
-import { VisionScreen } from './src/screens/VisionScreen';
 import { AlertsScreen } from './src/screens/AlertsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { TelemetryScreen } from './src/screens/TelemetryScreen';
@@ -21,7 +20,6 @@ import { ChatScreen } from './src/screens/ChatScreen';
 export type ScreenType =
   | 'sensors'
   | 'crop'
-  | 'vision'
   | 'pump'
   | 'alerts'
   | 'telemetry'
@@ -38,8 +36,6 @@ export default function App() {
         return <SensorScreen onNavigate={(screen) => setActiveScreen(screen as ScreenType)} />;
       case 'crop':
         return <CropRecommendationScreen />;
-      case 'vision':
-        return <VisionScreen />;
       case 'pump':
         return <PumpControlScreen />;
       case 'alerts':
@@ -61,12 +57,11 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Top Application Header */}
       <View style={styles.header}>
         <View style={styles.headerTitleRow}>
           <Text style={styles.headerLogo}>🌱</Text>
           <View>
-            <Text style={styles.headerTitle}>AgriSaathi AI</Text>
+            <Text style={styles.headerTitle}>AgriSaathi</Text>
             <Text style={styles.headerSubtitle}>Smart Precision Agriculture • SIH26180</Text>
           </View>
         </View>
@@ -95,10 +90,8 @@ export default function App() {
         </View>
       </View>
 
-      {/* Main Screen Body */}
       <View style={styles.screenContainer}>{renderScreen()}</View>
 
-      {/* Bottom Navigation Bar matching Design Reference */}
       <View style={styles.tabBar}>
         <TouchableOpacity
           style={[styles.tabItem, activeScreen === 'sensors' && styles.tabItemActive]}
@@ -117,16 +110,6 @@ export default function App() {
           <Text style={styles.tabIcon}>🌱</Text>
           <Text style={[styles.tabLabel, activeScreen === 'crop' && styles.tabLabelActive]}>
             Crops
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tabItem, activeScreen === 'vision' && styles.tabItemActive]}
-          onPress={() => setActiveScreen('vision')}
-        >
-          <Text style={styles.tabIcon}>📷</Text>
-          <Text style={[styles.tabLabel, activeScreen === 'vision' && styles.tabLabelActive]}>
-            Leaf AI
           </Text>
         </TouchableOpacity>
 
