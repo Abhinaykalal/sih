@@ -105,7 +105,7 @@ class OllamaService:
             with urllib.request.urlopen(req, timeout=2) as response:
                 if response.status == 200:
                     payload = json.loads(response.read().decode("utf-8"))
-                    names = [m.get("name") for m in payload.get("models", []) if isinstance(m, dict)]
+                    names = [str(m.get("name")) for m in payload.get("models", []) if isinstance(m, dict) and m.get("name")]
                     for candidate in ["qwen2.5:1.5b", "qwen2.5:1.5b-instruct", "llama3.2:3b", "llama3.2:1b", "qwen2.5:7b-instruct"]:
                         if any(candidate in n for n in names):
                             return candidate
