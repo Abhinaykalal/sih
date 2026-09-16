@@ -296,6 +296,43 @@ def health_check():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+# ============================================================
+# OLLAMA TUNNEL URL MANAGEMENT
+# Mobile app fetches this to get the current edge AI (Ollama)
+# endpoint — avoids hardcoding ephemeral tunnel URLs in the APK.
+# ============================================================
+
+# In-memory store; updated at runtime via PUT /api/ollama/config
+_ollama_tunnel_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+class OllamaTunnelConfig(BaseModel):
+    tunnel_url: str
+    model: Optional[str] = None
+
+@app.get("/api/ollama/config")
+def get_ollama_config():
+    """Returns the current Ollama tunnel URL for the mobile app to use."""
+    return {
+        "tunnel_url": _ollama_tunnel_url,
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+
+@app.put("/api/ollama/config")
+def update_ollama_config(payload: OllamaTunnelConfig):
+    """Updates the active Ollama tunnel URL (call this when a new cloudflared session starts)."""
+    global _ollama_tunnel_url
+    _ollama_tunnel_url = payload.tunnel_url.rstrip("/")
+    if payload.model:
+        os.environ["OLLAMA_MODEL"] = payload.model
+    logger.info("Ollama tunnel URL updated to: %s", _ollama_tunnel_url)
+    return {
+        "status": "updated",
+        "tunnel_url": _ollama_tunnel_url,
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+
 @app.get("/version")
 def version_info():
     """Version and specification tag."""
