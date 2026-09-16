@@ -93,16 +93,34 @@ class OllamaService:
 
     @property
     def default_model(self) -> str:
-        return self._custom_default_model or os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+        if self._custom_default_model:
+            return self._custom_default_model
+        env_model = os.getenv("OLLAMA_MODEL")
+        if env_model:
+            return env_model
+        # Prefer fast lightweight model on local CPU if available
+        try:
+            url = f"{self.base_url}/api/tags"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=2) as response:
+                if response.status == 200:
+                    payload = json.loads(response.read().decode("utf-8"))
+                    names = [m.get("name") for m in payload.get("models", []) if isinstance(m, dict)]
+                    for candidate in ["qwen2.5:1.5b", "qwen2.5:1.5b-instruct", "llama3.2:3b", "llama3.2:1b", "qwen2.5:7b-instruct"]:
+                        if any(candidate in n for n in names):
+                            return candidate
+        except Exception:
+            pass
+        return "qwen2.5:1.5b"
 
     @property
     def timeout(self) -> int:
         if self._custom_timeout is not None:
             return self._custom_timeout
         try:
-            return int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
+            return int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
         except (ValueError, TypeError):
-            return 60
+            return 120
 
     def check_health(self) -> OllamaServiceStatus:
         """

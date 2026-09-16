@@ -1,25 +1,72 @@
-export default function Home() {
-    return (
-        <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "2rem", textAlign: "center" }}>
-            <div style={{ maxWidth: "600px", background: "#FFFFFF", padding: "2.5rem", borderRadius: "20px", boxShadow: "0 10px 30px rgba(18, 61, 37, 0.06)", border: "1px solid #EAF8E8" }}>
-                <div style={{ display: "inline-flex", padding: "0.5rem 1rem", background: "#EAF8E8", borderRadius: "999px", color: "#2E8B36", fontSize: "0.875rem", fontWeight: 600, marginBottom: "1.25rem" }}>
-                    🌱 AgriSaathi AI Platform
-                </div>
-                <h1 style={{ fontSize: "1.75rem", fontWeight: 700, color: "#123D25", margin: "0 0 1rem 0" }}>
-                    Android Mobile Platform Active
-                </h1>
-                <p style={{ color: "#6B7C70", lineHeight: 1.6, margin: "0 0 1.5rem 0", fontSize: "1rem" }}>
-                    The native Android application under <code>android-app/</code> is active. Core API services and IoT telemetry engines are operational on port 8000.
-                </p>
-                <div style={{ display: "flex", justifyContent: "center", gap: "1rem", flexWrap: "wrap" }}>
-                    <span style={{ padding: "0.5rem 1rem", background: "#F5FBF1", borderRadius: "12px", border: "1px solid #EAF8E8", fontSize: "0.85rem", color: "#123D25", fontWeight: 500 }}>
-                        📡 FastAPI Backend: <b>8000</b>
-                    </span>
-                    <span style={{ padding: "0.5rem 1rem", background: "#F5FBF1", borderRadius: "12px", border: "1px solid #EAF8E8", fontSize: "0.85rem", color: "#123D25", fontWeight: 500 }}>
-                        📱 Android App: <b>android-app/</b>
-                    </span>
-                </div>
-            </div>
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Header } from '@/components/Header';
+import { AiChatModule } from '@/components/AiChatModule';
+import { VisionDiagnosticModule } from '@/components/VisionDiagnosticModule';
+import { CropRecommendationModule } from '@/components/CropRecommendationModule';
+import { IoTDashboardModule } from '@/components/IoTDashboardModule';
+import { webApi } from '@/lib/webApiClient';
+
+export default function HomePage() {
+  const [activeTab, setActiveTab] = useState<string>('chat');
+  const [language, setLanguage] = useState<string>('en');
+  const [backendOnline, setBackendOnline] = useState<boolean>(true);
+
+  useEffect(() => {
+    // Check backend health on mount
+    webApi.checkHealth().then((res) => {
+      setBackendOnline(res.status === 'ok' || res.status === 'healthy');
+    });
+
+    const interval = setInterval(() => {
+      webApi.checkHealth().then((res) => {
+        setBackendOnline(res.status === 'ok' || res.status === 'healthy');
+      });
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-[#0A0F0D] text-gray-100 flex flex-col selection:bg-emerald-500/30 selection:text-emerald-200">
+      
+      {/* Dynamic Background Gradients */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/3 -right-40 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 left-1/3 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative z-10 flex-1 flex flex-col">
+        
+        {/* Navigation Header */}
+        <Header
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          language={language}
+          setLanguage={setLanguage}
+          backendOnline={backendOnline}
+        />
+
+        {/* Main Content Area */}
+        <main className="max-w-7xl w-full mx-auto px-4 lg:px-8 pb-12 flex-1">
+          {activeTab === 'chat' && <AiChatModule language={language} />}
+          {activeTab === 'vision' && <VisionDiagnosticModule />}
+          {activeTab === 'recommend' && <CropRecommendationModule />}
+          {activeTab === 'iot' && <IoTDashboardModule />}
         </main>
-    );
+
+        {/* Footer */}
+        <footer className="border-t border-white/5 py-6 text-center text-xs text-gray-500">
+          <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <span>AgriSaathi AI • Problem Statement SIH26180</span>
+            <span>Edge-Native AI, IoT Telemetry & Precision Agriculture</span>
+          </div>
+        </footer>
+
+      </div>
+
+    </div>
+  );
 }

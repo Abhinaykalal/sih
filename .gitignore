@@ -92,7 +92,11 @@ datasets/external/*
 !datasets/external/.gitkeep
 datasets/processed/*
 !datasets/processed/.gitkeep
+datasets/PlantVillage/
+datasets/plantvillage dataset/
+*.zip
 
 # Temporary files
 tmp/
 temp/
+

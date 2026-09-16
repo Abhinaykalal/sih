@@ -1,0 +1,16 @@
+{
+  "validation": {
+    "accuracy": 0.560102,
+    "balanced_accuracy": 0.553541,
+    "macro_precision": 0.554995,
+    "macro_recall": 0.553541,
+    "macro_f1": 0.542484
+  },
+  "test": {
+    "accuracy": 0.580563,
+    "balanced_accuracy": 0.59123,
+    "macro_precision": 0.592646,
+    "macro_recall": 0.59123,
+    "macro_f1": 0.574401
+  }
+}

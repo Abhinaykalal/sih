@@ -369,11 +369,10 @@ def models_status():
 
 
 
-# ============================================================
-# MODULE 1: AI CROP RECOMMENDATION (ML Model)
-# ============================================================
-
 @app.post("/api/recommend", response_model=RecommendationResponse)
+@app.post("/api/recommend/crop", response_model=RecommendationResponse)
+@app.post("/recommend", response_model=RecommendationResponse)
+@app.post("/recommend/crop", response_model=RecommendationResponse)
 def recommend_crop(features: CropFeatures):
     """Module 1: Recommends the best crop based on soil & climate parameters with honest provenance."""
     import uuid

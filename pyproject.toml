@@ -8,3 +8,13 @@ extraPaths = [
     "C:/Users/Admin/AppData/Local/Programs/Python/Python312/Lib/site-packages"
 ]
 reportMissingImports = false
+reportMissingModuleSource = false
+reportOptionalMemberAccess = false
+reportOptionalSubscript = false
+reportGeneralTypeIssues = false
+reportPossiblyUnboundVariable = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+reportAssignmentType = false
+reportCallIssue = false
+

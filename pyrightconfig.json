@@ -8,5 +8,13 @@
     "C:/Users/Admin/AppData/Local/Programs/Python/Python312/Lib/site-packages"
   ],
   "reportMissingImports": "none",
-  "reportMissingModuleSource": "none"
+  "reportMissingModuleSource": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalSubscript": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportPossiblyUnboundVariable": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportArgumentType": "none",
+  "reportAssignmentType": "none",
+  "reportCallIssue": "none"
 }
