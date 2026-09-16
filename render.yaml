@@ -40,3 +40,15 @@ services:
         sync: false
       - key: OPENWEATHER_API_KEY
         sync: false
+      - key: MQTT_BROKER_HOST
+        sync: false
+      - key: MQTT_BROKER_PORT
+        value: "8883"
+      - key: MQTT_USERNAME
+        sync: false
+      - key: MQTT_PASSWORD
+        sync: false
+      - key: MQTT_USE_TLS
+        value: "true"
+      - key: MQTT_CA_CERT
+        sync: false
