@@ -99,4 +99,7 @@ datasets/plantvillage dataset/
 # Temporary files
 tmp/
 temp/
+cloudflared.exe
+cloudflared.log
+
 
