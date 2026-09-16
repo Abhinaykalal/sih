@@ -2236,6 +2236,7 @@ def api_ai_chat(
                     field_id="zone-1-north-field",
                     user_id="anonymous"
                 )
+                res = orch.process_query(agent_req)
                 citations = []
                 if getattr(res, "evidence", None):
                     for ev in res.evidence:
