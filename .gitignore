@@ -23,6 +23,9 @@ ml-backend/.env
 mlbackend/.env
 *.env
 
+# Device / hardware secrets
+edge_hardware/secrets.h
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
@@ -101,5 +104,3 @@ tmp/
 temp/
 cloudflared.exe
 cloudflared.log
-
-
