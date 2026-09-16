@@ -51,9 +51,6 @@ class Settings(BaseSettings):
         super().__init__(**values)
         if "*" in self.CORS_ALLOWED_ORIGINS:
             raise ValueError("CORS_ALLOWED_ORIGINS must not contain '*'.")
-        insecure_dev = self.DEV_MODE and self.DEV_ALLOW_INSECURE_AUTH and not self.ENFORCE_JWT_AUTH
-        if self.ENFORCE_JWT_AUTH and not self.SUPABASE_JWT_SECRET and not insecure_dev:
-            raise ValueError("SUPABASE_JWT_SECRET must be configured when JWT authentication is enabled.")
         if self.DEV_ALLOW_INSECURE_AUTH and not self.DEV_MODE:
             raise ValueError("DEV_ALLOW_INSECURE_AUTH requires DEV_MODE=true.")
         if self.MQTT_USE_TLS and self.MQTT_BROKER_PORT == 1883:
