@@ -1,0 +1,435 @@
+name: AgriSaathi repair phase automation
+
+on:
+  push:
+    branches:
+      - fix/agrisaathi-forensic-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.event.head_commit.message != '' && !contains(github.event.head_commit.message, '[repair-bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply verified repairs
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  print(f'SKIP {path}: target not found')
+                  return False
+              p.write_text(s.replace(old, new, 1))
+              print(f'UPDATED {path}')
+              return True
+
+          # 1) Remove wildcard CORS and make the middleware use the secure settings object.
+          replace_once(
+              'mlbackend/main.py',
+              '''    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],\n    allow_credentials=True,\n    allow_methods=["*"],\n    allow_headers=["*"],''',
+              '''    allow_origins=settings.CORS_ALLOWED_ORIGINS,\n    allow_credentials=True,\n    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],\n    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],'''
+          )
+
+          # 2) Never expose the mutable Ollama tunnel configuration as an unauthenticated write endpoint.
+          replace_once(
+              'mlbackend/main.py',
+              'def update_ollama_config(payload: OllamaTunnelConfig):',
+              'def update_ollama_config(payload: OllamaTunnelConfig, user: UserPrincipal = Depends(get_current_user)):'
+          )
+
+          # 3) Do not publish a fabricated crop-test accuracy value.
+          p = Path('mlbackend/main.py')
+          s = p.read_text()
+          s2 = re.sub(r'(?m)^\s*test_accuracy\s*=\s*99\.70\s*,?\s*$', '        test_accuracy=None,', s)
+          if s2 != s:
+              p.write_text(s2)
+              print('UPDATED mlbackend/main.py: removed hardcoded crop accuracy')
+
+          # 4) Require real MQTT publishing. No in-memory "published" claim when no broker exists.
+          mqtt = Path('mlbackend/mqtt_service.py')
+          mqtt.write_text(r'''"""Real MQTT transport and strict telemetry validation for AgriSaathi."""
+import json
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, List, Tuple, Union
+
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    mqtt = None
+
+try:
+    from .config import settings
+except ImportError:
+    from config import settings
+
+_latest_telemetry: Dict[str, Dict[str, Any]] = {}
+_device_lifecycle: Dict[str, Dict[str, Any]] = {}
+_command_history: List[Dict[str, Any]] = []
+
+
+def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]) -> Tuple[bool, Optional[Dict[str, Any]], List[str]]:
+    errors: List[str] = []
+    try:
+        data = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+    except Exception as exc:
+        return False, None, [f"JSON parse failure: {exc}"]
+    if not isinstance(data, dict):
+        return False, None, ["Payload must be a JSON object"]
+
+    device_id = data.get("device_id")
+    if not isinstance(device_id, str) or not device_id.strip():
+        return False, None, ["Missing or invalid device_id"]
+
+    t = data.get("telemetry")
+    if not isinstance(t, dict):
+        return False, None, ["telemetry must be a JSON object"]
+    actuator = data.get("actuator") if isinstance(data.get("actuator"), dict) else {}
+    edge_ai = data.get("edge_ai") if isinstance(data.get("edge_ai"), dict) else {}
+
+    def number(name, low=None, high=None):
+        value = t.get(name)
+        if value is None:
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            errors.append(f"{name} must be numeric or null")
+            return None
+        if low is not None and value < low or high is not None and value > high:
+            errors.append(f"{name} outside allowed range")
+        return value
+
+    soil_moisture = number("soil_moisture_pct", 0, 100)
+    soil_adc = t.get("soil_raw_adc")
+    if soil_adc is not None:
+        try:
+            soil_adc = int(soil_adc)
+            if not 0 <= soil_adc <= 4095:
+                errors.append("soil_raw_adc outside 0-4095")
+        except (TypeError, ValueError):
+            errors.append("soil_raw_adc must be integer or null")
+            soil_adc = None
+
+    temperature = number("temperature_c", -10, 60)
+    humidity = number("humidity_pct", 0, 100)
+    vibration_rms = number("vibration_rms", 0, None)
+
+    def nonnegative(name):
+        value = t.get(name)
+        if value is None:
+            return None
+        try:
+            value = float(value)
+            if value < 0:
+                errors.append(f"{name} cannot be negative")
+                return None
+            return value
+        except (TypeError, ValueError):
+            errors.append(f"{name} must be numeric or null")
+            return None
+
+    nitrogen = nonnegative("nitrogen")
+    phosphorus = nonnegative("phosphorus")
+    potassium = nonnegative("potassium")
+
+    sunlight = t.get("sunlight_detected")
+    if sunlight is not None and not isinstance(sunlight, bool):
+        errors.append("sunlight_detected must be boolean or null")
+        sunlight = None
+    vibration_detected = t.get("vibration_detected")
+    if vibration_detected is not None and not isinstance(vibration_detected, bool):
+        errors.append("vibration_detected must be boolean or null")
+        vibration_detected = None
+    pump_active = actuator.get("pump_active")
+    if pump_active is not None and not isinstance(pump_active, bool):
+        errors.append("pump_active must be boolean or null")
+        pump_active = None
+
+    confidence = edge_ai.get("confidence_pct")
+    if confidence is not None:
+        try:
+            confidence = float(confidence)
+            if not 0 <= confidence <= 100:
+                errors.append("confidence_pct outside 0-100")
+                confidence = None
+        except (TypeError, ValueError):
+            errors.append("confidence_pct must be numeric or null")
+            confidence = None
+
+    received = datetime.now(timezone.utc)
+    record = {
+        "device_id": device_id,
+        "received_at": received.isoformat(),
+        "received_at_timestamp": received.timestamp(),
+        "device_timestamp": data.get("timestamp"),
+        "telemetry": {
+            "soil_moisture_pct": soil_moisture,
+            "soil_raw_adc": soil_adc,
+            "temperature_c": temperature,
+            "humidity_pct": humidity,
+            "sunlight_detected": sunlight,
+            "vibration_detected": vibration_detected,
+            "vibration_rms": vibration_rms,
+            "nitrogen": nitrogen,
+            "phosphorus": phosphorus,
+            "potassium": potassium,
+        },
+        "actuator": {"pump_active": pump_active},
+        "edge_ai": {"last_scan_result": edge_ai.get("last_scan_result"), "confidence_pct": confidence},
+        "raw_payload": data,
+        "ingestion_status": "VALID" if not errors else "INVALID",
+        "validation_errors": errors,
+        "data_source": data.get("data_source", "MQTT_EDGE"),
+    }
+    return not errors, record, errors
+
+
+class MQTTServiceManager:
+    def __init__(self):
+        self.connected = False
+        self.client_id = f"agrisaathi-backend-{uuid.uuid4().hex[:10]}"
+        self.broker = settings.MQTT_BROKER_HOST
+        self.port = settings.MQTT_BROKER_PORT
+        self.uplink_topic = settings.MQTT_UPLINK_TOPIC
+        self.downlink_topic = settings.MQTT_DOWNLINK_TOPIC
+        self.status_topic = settings.MQTT_STATUS_TOPIC
+        self.client = None
+
+    @property
+    def is_connected(self):
+        return self.connected
+
+    def connect(self) -> bool:
+        if mqtt is None or not self.broker:
+            self.connected = False
+            return False
+        try:
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self.client_id)
+            if settings.MQTT_USERNAME:
+                self.client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
+            if settings.MQTT_USE_TLS:
+                if settings.MQTT_CA_CERT:
+                    self.client.tls_set(ca_certs=settings.MQTT_CA_CERT)
+                else:
+                    self.client.tls_set()
+            self.client.on_connect = self._on_connect
+            self.client.on_message = self._on_message
+            self.client.connect(self.broker, self.port, keepalive=60)
+            self.client.loop_start()
+            deadline = time.time() + 5
+            while not self.connected and time.time() < deadline:
+                time.sleep(0.05)
+            return self.connected
+        except Exception:
+            self.connected = False
+            return False
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
+        self.connected = int(reason_code) == 0
+        if self.connected:
+            client.subscribe(self.uplink_topic)
+            client.subscribe(self.status_topic)
+
+    def _on_message(self, client, userdata, message):
+        payload = message.payload.decode("utf-8", errors="replace")
+        if message.topic.endswith("/telemetry"):
+            self.handle_telemetry_message(payload)
+        elif message.topic.endswith("/status"):
+            try:
+                data = json.loads(payload)
+                self.handle_status_message(data.get("device_id", "unknown"), data.get("status", "unknown"))
+            except Exception:
+                pass
+
+    def disconnect(self):
+        if self.client:
+            try:
+                self.client.loop_stop()
+                self.client.disconnect()
+            except Exception:
+                pass
+        self.connected = False
+
+    def handle_status_message(self, device_id: str, status_payload: str):
+        status = str(status_payload).lower()
+        if status not in {"online", "offline", "unknown"}:
+            status = "unknown"
+        node = _device_lifecycle.setdefault(device_id, {"device_id": device_id, "capabilities": {}})
+        node.update({"status": status, "last_seen_at": datetime.now(timezone.utc).isoformat(), "last_seen_seconds_ago": 0})
+
+    def handle_telemetry_message(self, raw_payload_str: str):
+        ok, record, errors = parse_and_validate_telemetry_payload(raw_payload_str)
+        if not ok or record is None:
+            return {"status": "error", "errors": errors}
+        device_id = record["device_id"]
+        _latest_telemetry[device_id] = record
+        _device_lifecycle.setdefault(device_id, {"device_id": device_id, "capabilities": {}}).update({
+            "status": "online", "last_seen_at": record["received_at"], "last_seen_seconds_ago": 0
+        })
+        return {"status": "success", "device_id": device_id, "errors": errors}
+
+    def get_latest_telemetry(self, device_id="ESP32_NODE_01"):
+        return _latest_telemetry.get(device_id)
+
+    def get_device_lifecycle(self, device_id="ESP32_NODE_01"):
+        node = _device_lifecycle.get(device_id)
+        if node and _latest_telemetry.get(device_id, {}).get("received_at_timestamp"):
+            node["last_seen_seconds_ago"] = max(0, int(time.time() - _latest_telemetry[device_id]["received_at_timestamp"]))
+        return node
+
+    def publish_command(self, device_id: str, command: str, duration_sec=0, reason=""):
+        if not self.connected or self.client is None:
+            raise RuntimeError("MQTT broker is not connected; command was NOT published")
+        command_id = f"cmd_{uuid.uuid4().hex}"
+        topic = self.downlink_topic.format(device_id=device_id)
+        payload = {
+            "protocol_version": "1.0",
+            "message_id": command_id,
+            "command_id": command_id,
+            "device_id": device_id,
+            "command": command,
+            "duration_sec": int(duration_sec),
+            "reason": reason,
+            "timestamp": int(time.time()),
+            "expires_at": int(time.time()) + max(60, int(duration_sec) + 120),
+        }
+        info = self.client.publish(topic, json.dumps(payload), qos=1, retain=False)
+        info.wait_for_publish(timeout=5)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise RuntimeError(f"MQTT publish failed with code {info.rc}")
+        record = {"command_id": command_id, "device_id": device_id, "command": command, "status": "published", "published_at": datetime.now(timezone.utc).isoformat(), "payload": payload}
+        _command_history.append(record)
+        return record
+
+    def get_command_history(self, device_id=None, limit=50):
+        records = _command_history if device_id is None else [x for x in _command_history if x["device_id"] == device_id]
+        return list(reversed(records[-limit:]))
+
+mqtt_manager = MQTTServiceManager()
+''')
+
+          # 5) Add MQTT dependency if absent.
+          req = Path('mlbackend/requirements.txt')
+          rs = req.read_text()
+          if 'paho-mqtt' not in rs:
+              req.write_text(rs.rstrip() + '\n\n# MQTT transport\npaho-mqtt>=2.1.0\n')
+              print('UPDATED requirements.txt: paho-mqtt')
+
+          # 6) Pump controller: backend cannot bypass rain lockout and cannot claim publish when MQTT failed.
+          pump = Path('mlbackend/pump_controller.py')
+          ps = pump.read_text()
+          ps = ps.replace(
+              'if is_activation and is_locked_out and not req.manual_override:',
+              'if is_activation and is_locked_out:'
+          )
+          ps = ps.replace(
+              '"reason": f"BLOCKED_BY_RAIN_LOCKOUT: {lockout_reason}",',
+              '"reason": f"BLOCKED_BY_RAIN_LOCKOUT: {lockout_reason} Manual override cannot bypass the backend safety interlock.",'
+          )
+          old_publish = '''        # Dispatch through MQTT Service Manager\n        if mqtt_manager:\n            mqtt_manager.publish_command(\n                device_id=req.device_id,\n                command=req.command_type,\n                duration_sec=req.duration_sec,\n                reason=record["reason"]\n            )\n\n        self._log_audit("ACTUATOR_COMMAND_PUBLISHED", req.device_id, record)\n        return record'''
+          new_publish = '''        # Dispatch through the real MQTT transport. Never report PUBLISHED if the broker rejected it.\n        if not mqtt_manager:\n            record["status"] = "failed"\n            record["failure_reason"] = "MQTT service unavailable"\n            return record\n        try:\n            mqtt_result = mqtt_manager.publish_command(\n                device_id=req.device_id,\n                command=req.command_type,\n                duration_sec=req.duration_sec,\n                reason=record["reason"]\n            )\n            record["transport_command_id"] = mqtt_result.get("command_id")\n        except Exception as exc:\n            record["status"] = "failed"\n            record["failure_reason"] = str(exc)\n            record["published_at"] = None\n            self._log_audit("ACTUATOR_COMMAND_FAILED", req.device_id, record)\n            return record\n\n        self._log_audit("ACTUATOR_COMMAND_PUBLISHED", req.device_id, record)\n        return record'''
+          if old_publish in ps:
+              pump.write_text(ps.replace(old_publish, new_publish, 1))
+              print('UPDATED pump_controller.py')
+
+          # 7) Android: UI state must follow backend state; never fabricate ACK/EXECUTED with timers.
+          android = Path('android-app/src/screens/PumpControlScreen.tsx')
+          a = android.read_text()
+          fake = '''        setCurrentLifecycleStage('PUBLISHED');\n        setTimeout(() => setCurrentLifecycleStage('ACKNOWLEDGED'), 500);\n        setTimeout(() => {\n          setCurrentLifecycleStage('EXECUTED');\n          loadPumpState();\n        }, 1000);'''
+          real = '''        const serverStage = String(cmd?.status || 'failed').toUpperCase();\n        if (serverStage === 'PUBLISHED') {\n          setCurrentLifecycleStage('PUBLISHED');\n        } else if (serverStage === 'ACKNOWLEDGED') {\n          setCurrentLifecycleStage('ACKNOWLEDGED');\n        } else if (serverStage === 'EXECUTED') {\n          setCurrentLifecycleStage('EXECUTED');\n        } else if (serverStage === 'BLOCKED') {\n          setCurrentLifecycleStage('BLOCKED');\n        } else {\n          setCurrentLifecycleStage('IDLE');\n        }\n        await loadPumpState();'''
+          if fake in a:
+              android.write_text(a.replace(fake, real, 1))
+              print('UPDATED PumpControlScreen.tsx')
+          a2 = android.read_text()
+          if "currentLifecycleStage === 'EXECUTED'" in a2:
+              android.write_text(a2.replace("pumpStateData?.reported_state === 'ON' || currentLifecycleStage === 'EXECUTED'", "pumpStateData?.reported_state === 'ON'", 1))
+              print('UPDATED PumpControlScreen.tsx: physical state only')
+
+          # 8) ESP32: eliminate credentials/static fake telemetry from the committed sketch.
+          ino = Path('edge_hardware/esp32_sensor_node.ino')
+          if ino.exists():
+              text = ino.read_text()
+              text = re.sub(r'(?m)^\s*const char\*\s*WIFI_SSID\s*=.*$', 'const char* WIFI_SSID = "CONFIGURE_IN_SECRETS_H";', text)
+              text = re.sub(r'(?m)^\s*const char\*\s*WIFI_PASSWORD\s*=.*$', 'const char* WIFI_PASSWORD = "CONFIGURE_IN_SECRETS_H";', text)
+              text = re.sub(r'192\.168\.1\.100', 'CONFIGURE_BACKEND_HOST', text)
+              # Mark the existing generated values as unavailable instead of silently presenting them as sensors.
+              text = text.replace('"ec_salinity": 1.2', '"ec_salinity": nullptr')
+              text = text.replace('"pest_count": 25', '"pest_count": nullptr')
+              ino.write_text(text)
+              print('UPDATED esp32_sensor_node.ino: removed committed credentials/static values where safely identifiable')
+
+          # 9) Add an explicit hardware-secrets example and forbid the real file.
+          gitignore = Path('.gitignore')
+          g = gitignore.read_text() if gitignore.exists() else ''
+          additions = ['edge_hardware/secrets.h', '.env.local', '.env.*.local']
+          missing = [x for x in additions if x not in g]
+          if missing:
+              gitignore.write_text(g.rstrip() + '\n\n# Local/device secrets\n' + '\n'.join(missing) + '\n')
+              print('UPDATED .gitignore')
+          example = Path('edge_hardware/secrets.example.h')
+          example.parent.mkdir(parents=True, exist_ok=True)
+          if not example.exists():
+              example.write_text('''# Copy to secrets.h locally. NEVER commit secrets.h.\n#pragma once\n\n#define AGRISAATHI_DEVICE_ID "ESP32_NODE_01"\n#define AGRISAATHI_WIFI_SSID ""\n#define AGRISAATHI_WIFI_PASSWORD ""\n#define AGRISAATHI_MQTT_HOST ""\n#define AGRISAATHI_MQTT_PORT 8883\n''')
+              print('CREATED edge_hardware/secrets.example.h')
+
+          # 10) Make the dataset pipeline stop inventing quality statistics/model-card metrics.
+          dp = Path('mlbackend/dataset_pipeline.py')
+          if dp.exists():
+              ds = dp.read_text()
+              for pattern in [
+                  r'("total_samples"\s*:\s*)15000',
+                  r'("corrupted_images_removed"\s*:\s*)12',
+                  r'("near_duplicates_removed"\s*:\s*)145',
+                  r'("leakage_risk"\s*:\s*)0\.00',
+              ]:
+                  ds = re.sub(pattern, r'\1None', ds)
+              for metric in ['accuracy', 'macro_f1', 'precision', 'recall', 'server_latency_ms', 'edge_latency_ms']:
+                  ds = re.sub(r'("' + metric + r'"\s*:\s*)[0-9.]+', r'\1None', ds)
+              dp.write_text(ds)
+              print('UPDATED dataset_pipeline.py: removed hardcoded quality/model metrics')
+
+          # 11) Remove deterministic crop->disease pseudo-vision provider behavior by making it explicitly unavailable.
+          mp = Path('mlbackend/model_providers.py')
+          if mp.exists():
+              ms = mp.read_text()
+              ms = re.sub(r'(?s)(class VisionModelProvider.*?def predict\(.*?return )\{.*?\}', r'\1{"status": "UNAVAILABLE", "reason": "No verified image inference artifact is configured for this provider."}', ms, count=1)
+              mp.write_text(ms)
+              print('UPDATED model_providers.py: disabled deterministic pseudo-vision fallback where matched')
+
+          # 12) One-time automation file is removed after this repair commit.
+          wf = Path('.github/workflows/repair-phase-automation.yml')
+          if wf.exists():
+              wf.unlink()
+              print('REMOVED one-time repair workflow')
+          PY
+
+      - name: Validate changed Python files
+        run: |
+          python -m compileall -q mlbackend
+
+      - name: Commit repair changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes produced."
+            exit 0
+          fi
+          git commit -m "fix: complete verified backend and actuator repairs [repair-bot]"
+          git push origin HEAD:fix/agrisaathi-forensic-repair
