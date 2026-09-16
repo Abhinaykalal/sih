@@ -1,15 +1,14 @@
 """
-AgriSaathi AI — Supabase JWT Authentication & Authorization Middleware
-======================================================================
-Validates incoming Bearer tokens issued by Supabase Auth (HS256 or RS256).
-Enforces farmer-level and admin-level ownership checks across FastAPI routes.
+AgriSaathi AI authentication and authorization helpers.
+
+Production behavior is strict: a valid Supabase JWT is required. Any
+insecure development bypass must be explicitly enabled with both DEV_MODE
+and DEV_ALLOW_INSECURE_AUTH and must never be enabled in deployment config.
 """
 
-import os
-import time
 import jwt
 from typing import Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -20,93 +19,102 @@ except ImportError:
 
 security = HTTPBearer(auto_error=False)
 
+
 class UserPrincipal(BaseModel):
     user_id: str
     email: Optional[str] = None
     role: str = "farmer"
     phone: Optional[str] = None
-    raw_claims: Dict[str, Any] = {}
+    raw_claims: Dict[str, Any] = Field(default_factory=dict)
+
 
 def decode_supabase_jwt(token: str) -> Dict[str, Any]:
-    """
-    Decodes and validates a Supabase JWT token.
-    Checks expiration, issuer, and signature.
-    """
+    """Validate a Supabase JWT. Never decode an unverified token in production."""
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token is required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     secret = settings.SUPABASE_JWT_SECRET
-    
-    # 1. First check if it's a simulated development/test token
-    if token.startswith("test-token-") or token.startswith("dev-token-"):
-        parts = token.split("-")
-        role = parts[2] if len(parts) > 2 else "farmer"
-        return {
-            "sub": f"user-{parts[-1]}",
-            "email": f"{role}@agrisaathi.org",
-            "role": role,
-            "exp": int(time.time()) + 3600
-        }
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is not configured on this server.",
+        )
 
     try:
-        # Supabase default uses HS256 with project JWT secret
-        unverified_header = jwt.get_unverified_header(token)
-        alg = unverified_header.get("alg", "HS256")
+        header = jwt.get_unverified_header(token)
+        algorithm = header.get("alg")
+        if algorithm != "HS256":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unsupported authentication algorithm.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-        # In development without actual secret, decode without verification if dev secret is placeholder
-        verify_signature = secret != "agrisaathi-dev-jwt-secret-do-not-use-in-production"
-        
-        payload = jwt.decode(
+        return jwt.decode(
             token,
-            secret if verify_signature else None,
-            algorithms=[alg],
-            options={"verify_signature": verify_signature, "verify_exp": True}
+            secret,
+            algorithms=["HS256"],
+            options={"verify_signature": True, "verify_exp": True},
         )
-        return payload
+    except HTTPException:
+        raise
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication token has expired. Please refresh your session.",
-            headers={"WWW-Authenticate": "Bearer"}
+            detail="Authentication token has expired.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    except Exception as e:
+    except (jwt.InvalidTokenError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication token: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"}
+            detail="Invalid authentication token.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)) -> UserPrincipal:
-    """
-    Strict FastAPI dependency: requires valid Bearer token if ENFORCE_JWT_AUTH is true,
-    or falls back to default authenticated principal in local dev mode.
-    """
+
+async def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> UserPrincipal:
+    """Return the authenticated principal or reject the request."""
     if not credentials:
-        if settings.ENFORCE_JWT_AUTH:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing Authorization Bearer header.",
-                headers={"WWW-Authenticate": "Bearer"}
+        if settings.DEV_MODE and settings.DEV_ALLOW_INSECURE_AUTH and not settings.ENFORCE_JWT_AUTH:
+            return UserPrincipal(
+                user_id="00000000-0000-0000-0000-000000000001",
+                email="farmer.dev@localhost",
+                role="farmer",
             )
-        # Default local dev user
-        return UserPrincipal(
-            user_id="00000000-0000-0000-0000-000000000001",
-            email="farmer.dev@agrisaathi.org",
-            role="farmer"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization Bearer header.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    token = credentials.credentials
-    claims = decode_supabase_jwt(token)
-    
+
+    claims = decode_supabase_jwt(credentials.credentials)
+    user_id = claims.get("sub") or claims.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token does not contain a user identity.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return UserPrincipal(
-        user_id=claims.get("sub", claims.get("user_id", "anonymous")),
+        user_id=str(user_id),
         email=claims.get("email"),
         role=claims.get("role", "farmer"),
         phone=claims.get("phone"),
-        raw_claims=claims
+        raw_claims=claims,
     )
 
-async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)) -> Optional[UserPrincipal]:
-    """
-    Optional dependency: returns UserPrincipal if valid token provided, else None.
-    """
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> Optional[UserPrincipal]:
+    """Optional authentication for explicitly public endpoints."""
     if not credentials:
         return None
     try:
@@ -114,13 +122,15 @@ async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] 
     except HTTPException:
         return None
 
+
 def require_role(allowed_roles: list):
-    """Dependency factory ensuring user has one of the allowed roles."""
+    """Dependency factory ensuring a user has one of the allowed roles."""
     async def role_checker(user: UserPrincipal = Depends(get_current_user)) -> UserPrincipal:
         if user.role not in allowed_roles and "admin" not in user.role:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. Required roles: {allowed_roles}, your role: {user.role}"
+                detail="Access denied for the requested operation.",
             )
         return user
+
     return role_checker

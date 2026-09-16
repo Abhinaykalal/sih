@@ -1,12 +1,12 @@
-# Render.com Deployment Blueprint
-# Deploys the AgriSaathi AI FastAPI backend as a Web Service.
-# Set environment variables in Render dashboard (never hardcode secrets here).
+# Render.com deployment blueprint
+# Production security defaults are enforced by the backend.
+# Secrets must be configured in Render's environment/secret settings.
 
 services:
   - type: web
     name: agrisaathi-api
     runtime: python
-    region: singapore  # Closest to India
+    region: singapore
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn mlbackend.main:app --host 0.0.0.0 --port $PORT
@@ -15,11 +15,15 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: ENFORCE_JWT_AUTH
+        value: "true"
+      - key: DEV_MODE
+        value: "false"
+      - key: DEV_ALLOW_INSECURE_AUTH
         value: "false"
       - key: OLLAMA_BASE_URL
-        value: ""          # Empty on Render — Ollama is NOT available on free tier
+        value: ""
       - key: GROQ_API_KEY
-        sync: false        # Set this in Render dashboard → Environment → Secret Files
+        sync: false
       - key: GROQ_MODEL
         value: "llama-3.1-8b-instant"
       - key: RAG_CHUNK_SIZE
@@ -27,8 +31,24 @@ services:
       - key: RAG_TOP_K
         value: "3"
       - key: SUPABASE_URL
-        sync: false        # Set in Render dashboard
+        sync: false
       - key: SUPABASE_KEY
-        sync: false        # Set in Render dashboard
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
       - key: OPENWEATHER_API_KEY
-        sync: false        # Set in Render dashboard
+        sync: false
+      - key: MQTT_BROKER_HOST
+        sync: false
+      - key: MQTT_BROKER_PORT
+        value: "8883"
+      - key: MQTT_USERNAME
+        sync: false
+      - key: MQTT_PASSWORD
+        sync: false
+      - key: MQTT_USE_TLS
+        value: "true"
+      - key: MQTT_CA_CERT
+        sync: false

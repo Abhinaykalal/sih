@@ -21,6 +21,9 @@ httpx>=0.27.0
 # Language Detection (offline, no API key)
 langdetect>=1.0.9
 
+# MQTT transport
+paho-mqtt>=2.1.0
+
 # Optional: Text-to-speech for IVR voice
 gtts>=2.5.0
 
