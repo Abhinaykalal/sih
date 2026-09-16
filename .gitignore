@@ -49,7 +49,7 @@ Thumbs.db
 *.onnx
 models/*.joblib
 models/*.pkl
-mlbackend/model.joblib
+!mlbackend/*.joblib
 
 # Deployment
 .vercel
