@@ -91,7 +91,8 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if any(w in v_lower for w in ["yellow", "chlorosis", "wilt"]) and soil_moisture < 20.0 and air_temp > 32.0:
         return {
             "diagnosis": "Water-Stress Induced Chlorosis (Abiotic)",
-            "confidence_pct": 96.5,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "DO NOT apply nitrogen fertilizer. Irrigate crop immediately to restore root turgor pressure.",
             "category": "Water Stress"
         }
@@ -100,7 +101,8 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if any(w in v_lower for w in ["yellow", "wilt", "stunted"]) and soil_moisture > 80.0:
         return {
             "diagnosis": "Waterlogging Root Hypoxia / Anaerobic Stress",
-            "confidence_pct": 93.0,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "Soil is waterlogged. Stop irrigation immediately and aerate/drain soil furrows.",
             "category": "Over-irrigation"
         }
@@ -109,7 +111,8 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if ("nitrogen" in v_lower or "chlorosis" in v_lower or "yellow" in v_lower) and soil_moisture >= 25.0 and ec_salinity <= 1.8:
         return {
             "diagnosis": "Nitrogen (N) Deficiency Chlorosis",
-            "confidence_pct": 94.0,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "Soil moisture is adequate. Apply Urea @ 25-30 kg/acre or liquid organic bio-nitrogen spray.",
             "category": "Nutrient Deficiency"
         }
@@ -118,7 +121,8 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if "potassium" in v_lower or "scorch" in v_lower or ("brown" in v_lower and "edge" in v_lower):
         return {
             "diagnosis": "Potassium (K) Deficiency / Marginal Leaf Scorch",
-            "confidence_pct": 91.5,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "Apply Muriate of Potash (MOP) @ 20 kg/acre or foliar spray of Potassium Nitrate (13-0-45) @ 1%.",
             "category": "Nutrient Deficiency"
         }
@@ -127,7 +131,8 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if "phosphorus" in v_lower or "purple" in v_lower or "bronze" in v_lower:
         return {
             "diagnosis": "Phosphorus (P) Deficiency / Anthocyanin Accumulation",
-            "confidence_pct": 92.0,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "Apply Single Super Phosphate (SSP) or DAP directly into root zone to enhance root development.",
             "category": "Nutrient Deficiency"
         }
@@ -136,7 +141,8 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if (any(w in v_lower for w in ["blight", "spot", "mildew", "rust"]) or humidity > 85.0):
         return {
             "diagnosis": "Fungal Blight / Foliar Pathogen Risk",
-            "confidence_pct": 94.5,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "High ambient humidity (>85%). Apply organic bio-fungicide (Trichoderma viride or Copper Oxychloride @ 2.5g/L).",
             "category": "Pathogen / Fungal"
         }
@@ -145,14 +151,16 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
     if ec_salinity > 2.2:
         return {
             "diagnosis": "Osmotic Root Burn / Soil Salinity Toxicity",
-            "confidence_pct": 95.0,
+            "confidence_pct": None,
+            "provenance": "RULE_BASED_HEURISTIC",
             "action": "Soil EC is toxic (>2.2 dS/m). Leach soil with clean water and halt all chemical fertilizers.",
             "category": "Salinity"
         }
 
     return {
         "diagnosis": vision_class if vision_class else "Healthy Foliage",
-        "confidence_pct": 92.0,
+        "confidence_pct": None,
+        "provenance": "RULE_BASED_HEURISTIC",
         "action": "Crop canopy in healthy condition. Maintain routine irrigation and IPM scouting.",
         "category": "Optimal"
     }

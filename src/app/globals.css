@@ -516,7 +516,7 @@ body {
 }
 
 /* ══════════════════════════════════════
-   FEATURE ROWS (Eligibility / Market etc.)
+   FEATURE ROWS
 ══════════════════════════════════════ */
 .feature-row {
     display: grid;
@@ -604,59 +604,6 @@ body {
     margin-left: 2px;
 }
 
-/* ── Market Ticker Widget ── */
-.market-widget {
-    width: 100%;
-}
-
-.market-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.7rem 0;
-    border-bottom: 1px solid rgba(0, 255, 127, 0.08);
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-}
-
-.market-row:last-child {
-    border-bottom: none;
-}
-
-.market-crop {
-    color: var(--text-dim);
-}
-
-.market-price {
-    color: var(--text-primary);
-    font-weight: 600;
-}
-
-.market-change {
-    font-size: 0.68rem;
-}
-
-.market-change.up {
-    color: var(--green);
-}
-
-.market-change.down {
-    color: var(--red-alert);
-}
-
-.market-bar {
-    height: 2px;
-    background: var(--border-raw);
-    margin-top: 0.3rem;
-    position: relative;
-    overflow: hidden;
-}
-
-.market-bar-fill {
-    height: 100%;
-    background: var(--green);
-    transition: width 2s ease;
-}
 
 /* ── Risk Meter Widget ── */
 .risk-widget {

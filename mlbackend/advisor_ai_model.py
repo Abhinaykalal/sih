@@ -10,11 +10,7 @@ import os
 import joblib
 import requests
 import json
-from typing import Dict, Any
-try:
-    from .custom_llm_inference import my_custom_ai
-except ImportError:
-    from custom_llm_inference import my_custom_ai
+from typing import Dict, Any, Optional
 
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "advisor_model.joblib")
@@ -44,7 +40,7 @@ class LocalAdvisorAIModel:
             except Exception as e:
                 print(f"Failed to load Advisor AI model: {e}")
 
-    def _try_local_ollama_llm(self, user_query: str) -> str:
+    def _try_local_ollama_llm(self, user_query: str) -> Optional[str]:
         try:
             payload = {
                 "model": "llama3.2:1b",
@@ -64,6 +60,20 @@ class LocalAdvisorAIModel:
         if ollama_reply:
             return f"[LOCAL LLM - LLAMA 3.2 EDGE]\n\n{ollama_reply}"
 
-        return my_custom_ai.chat(user_query)
+        if self.model_data and "pipeline" in self.model_data:
+            try:
+                pipeline = self.model_data["pipeline"]
+                responses = self.model_data.get("responses", {})
+                predicted_intent = pipeline.predict([user_query])[0]
+                if predicted_intent in responses:
+                    return f"[INTENT CLASSIFIER - {predicted_intent.upper()}]\n\n{responses[predicted_intent]}"
+            except Exception:
+                pass
+
+        return (
+            "[ADVISORY ASSISTANT]\n\n"
+            "For detailed guidance on crop cultivation, disease management, or fertilizer application, "
+            "please refer to the AgriSaathi Advisory Knowledge Engine or connect to an active LLM provider."
+        )
 
 local_advisor_ai = LocalAdvisorAIModel()

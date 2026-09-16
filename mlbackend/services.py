@@ -1,5 +1,8 @@
 import requests
-from deep_translator import GoogleTranslator
+try:
+    from deep_translator import GoogleTranslator
+except ImportError:
+    GoogleTranslator = None
 try:
     from .config import settings
 except ImportError:

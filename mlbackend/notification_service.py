@@ -35,7 +35,7 @@ class FarmerContact(BaseModel):
 
 class NotificationPayload(BaseModel):
     farmer: FarmerContact
-    alert_type: str                 # "scheme", "disaster", "market", "weather"
+    alert_type: str                 # "scheme", "disaster", "advisory", "weather"
     title: str
     message: str
     severity: str = "INFO"          # "INFO", "WARNING", "CRITICAL"
@@ -109,7 +109,7 @@ def dispatch_alert(payload: NotificationPayload) -> dict:
     SEVERITY_EMOJIS = {
         "scheme":   "🏛️",
         "disaster": "🚨",
-        "market":   "📈",
+        "advisory": "💡",
         "weather":  "🌦️"
     }
     emoji = SEVERITY_EMOJIS.get(payload.alert_type, "📢")

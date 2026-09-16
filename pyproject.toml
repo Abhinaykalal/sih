@@ -1,0 +1,10 @@
+[tool.pyright]
+venvPath = "f:/sih"
+venv = ".venv"
+extraPaths = [
+    "f:/sih",
+    "f:/sih/mlbackend",
+    "f:/sih/.venv/Lib/site-packages",
+    "C:/Users/Admin/AppData/Local/Programs/Python/Python312/Lib/site-packages"
+]
+reportMissingImports = false

@@ -27,8 +27,5 @@ gtts>=2.5.0
 # Optional: Supabase cloud sync (remove if offline-only)
 # supabase>=2.0.0
 
-# Optional: Satellite imagery (NDVI)
-# sentinelhub>=3.9.0
-
 # Optional: Deep translation (requires API key for premium)
 # deep-translator>=1.11.0

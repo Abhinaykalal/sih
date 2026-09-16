@@ -3,7 +3,7 @@
   "version": "1.5.0-Hybrid",
   "architecture": "IMD Climatological Thresholds + Agronomic Yield Loss Curves",
   "dataset_name": "IMD Agromet Climatological Risk Benchmark",
-  "training_date": "2026-09-11T04:47:28.464835+00:00",
+  "training_date": "2026-09-15T18:02:14.390798+00:00",
   "model_status": "RULE_BASED",
   "field_validation_required": false,
   "known_limitations": [

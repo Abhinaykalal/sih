@@ -59,8 +59,8 @@ Each suspicious, obsolete, or duplicate file is strictly classified under:
 | `pest_service.py` | Pest and pathogen risk prediction | **KEEP** | Microclimate pest threat calculation. |
 | `yield_service.py` | Crop yield estimation | **KEEP** | Baseline yield predictor. |
 | `rotation_service.py` | 3-season crop rotation planner | **KEEP** | Legume/pulse restorative rotation scheduler. |
-| `market_service.py` | Mandi APMC price and MSP benchmarking | **KEEP** | Market commodity price feed. |
-| `satellite_service.py` | Remote sensing NDVI/EVI simulation | **KEEP** | Geospatial field anomaly detection. |
+| ~~`market_service.py`~~ | Mandi APMC price and MSP benchmarking | **DELETED** | Removed: contained hardcoded mock/synthetic MSP and mandi prices presented as live data. Feature completely removed. |
+| ~~`satellite_service.py`~~ | Remote sensing NDVI/EVI simulation | **DELETED** | Removed: contained `0.65 + random.uniform(-0.15, 0.2)` synthetic NDVI fallback. Feature not integrated into core agronomic pipeline. |
 | `multilingual.py` | Language detection & translation | **KEEP** | English, Hindi, and Telugu localization engine. |
 | `agent_orchestrator.py`| Multi-agent reasoning and intent router | **KEEP** | Synthesizes sensor telemetry, RAG chunks, and domain tools. |
 | `rag_engine.py` | RAG retrieval with provenance citations | **KEEP** | Semantic search against verified agricultural knowledge base. |

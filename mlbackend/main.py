@@ -181,10 +181,6 @@ except ImportError:
         class RotationInput(BaseModel): lang: str = "en"
         def recommend_rotation(x): return {"error": "Module offline"}
 
-try:
-    from .market_service import get_market_prices
-except ImportError:
-    from market_service import get_market_prices
 
 try:
     from .notification_service import NotificationPayload, FarmerContact, dispatch_alert, send_telegram_message
@@ -260,7 +256,7 @@ class RecommendationResponse(BaseModel):
     recommended_crop: str
     confidence: float  # Maintained for backward compatibility
     prediction_confidence: float
-    test_accuracy: float = 99.1
+    test_accuracy: Optional[float] = None
     model_version: str = "rf-crop-v1.0"
     source: str = "MODEL_PREDICTION"
     provenance: str = "MODEL_PREDICTION"
@@ -286,7 +282,7 @@ def read_root():
         "modules": [
             "crop-recommend", "fertilizer-optimize", "weather-advice",
             "soil-health", "pest-disease", "yield-predict",
-            "crop-rotation", "market-prices", "geolang-detect"
+            "crop-rotation", "geolang-detect"
         ]
     }
 
@@ -389,8 +385,8 @@ def recommend_crop(features: CropFeatures):
             recommended_crop="Unavailable",
             confidence=0.0,
             prediction_confidence=0.0,
-            test_accuracy=99.1,
-            model_version="rf-crop-v1.0",
+            test_accuracy=None,
+            model_version="rf-crop-v1.2",
             source="UNAVAILABLE",
             provenance="UNAVAILABLE",
             prediction_timestamp=ts,
@@ -446,8 +442,8 @@ def recommend_crop(features: CropFeatures):
         recommended_crop=predicted_crop,
         confidence=confidence_score,
         prediction_confidence=confidence_score,
-        test_accuracy=99.1,
-        model_version="rf-crop-v1.0",
+        test_accuracy=99.70,
+        model_version="rf-crop-v1.2",
         source="MODEL_PREDICTION",
         provenance="MODEL_PREDICTION",
         prediction_timestamp=ts,
@@ -837,28 +833,16 @@ class ChatRequest(BaseModel):
 
 try:
     from .llm_service import get_llm_response
-    from .market_service import get_market_prices
 except ImportError:
     from llm_service import get_llm_response
-    from market_service import get_market_prices
 
-
-def _detect_commodity(text: str) -> Optional[str]:
-    """Detect if the user is asking about a specific commodity price."""
-    text_lower = text.lower()
-    # Common commodities
-    commodities = ["rice", "wheat", "maize", "cotton", "soybean", "groundnut", "sugarcane", "mustard"]
-    for comm in commodities:
-        if comm in text_lower:
-            return comm
-    return None
 
 @app.post("/api/chat")
 def ai_chat(req: ChatRequest):
     print(f"[BACKEND] Received chat request: {req.message[:50]}...")
     """
     Intelligent chat endpoint that:
-    1. Detects if user is asking about market prices - injects REAL data context
+    1. Injects real-time weather context when climate questions are asked
     2. Always responds in user's chosen language
     """
     lang_name = LANG_NAMES.get(req.lang, "English")
@@ -873,26 +857,7 @@ def ai_chat(req: ChatRequest):
 
     context_parts = []
 
-    # 1. Auto-inject market data if price is asked
-    commodity = _detect_commodity(req.message)
-    price_keywords = ["price", "rate", "mandi", "market", "cost", "bhav", "dam", "keemat"]
-    if commodity and any(kw in req.message.lower() for kw in price_keywords):
-        try:
-            price_data = get_market_prices(commodity, "Maharashtra")
-            if "error" not in price_data:
-                msp_str = f"Rs.{price_data['msp']}" if price_data.get('msp') else "None (horticulture)"
-                ctx = (
-                    f"REAL-TIME MARKET DATA (Updated {price_data['last_updated']}):\n"
-                    f"- Commodity: {price_data['commodity']}\n"
-                    f"- Current Avg Price: Rs.{price_data['current_price_inr']}/quintal\n"
-                    f"- Best Market: {price_data['market_centers'][0]['market']} @ Rs.{price_data['market_centers'][0]['price']}\n"
-                    f"- Insight: {price_data['market_insights'][0] if price_data['market_insights'] else 'Stable'}"
-                )
-                context_parts.append(ctx)
-        except Exception as e:
-            print(f"Market context inject failed: {e}")
-
-    # 2. Auto-inject weather data if climate is asked
+    # 1. Auto-inject weather data if climate is asked
     weather_keywords = ["weather", "rain", "monsoon", "temp", "heat", "cold", "humidity", "mausam", "baarish"]
     if any(kw in req.message.lower() for kw in weather_keywords):
         try:
@@ -955,98 +920,6 @@ def agent_chat_api(req: AgentChatRequest):
 
 
 
-# ============================================================
-# MODULE 11: SATELLITE CROP MONITORING (Remote Sensing)
-# ============================================================
-
-class SatelliteRequest(BaseModel):
-    lat: float
-    lon: float
-    crop: str = "rice"
-    area_acres: float = 2.0
-    lang: str = "en"
-
-@app.post("/api/satellite-analysis")
-def satellite_crop_analysis(req: SatelliteRequest):
-    """
-    Module 11: Remote sensing crop health analysis.
-    Simulates NDVI, EVI, crop stress scoring, and anomaly detection
-    for the specified field coordinates using AI inference.
-    In production, integrate with Sentinel-2 / NASA Earthdata APIs.
-    """
-    import random, math
-    from datetime import datetime, timedelta
-
-    lang_name = LANG_NAMES.get(req.lang, "English")
-
-    # Use New Service (Live Sentinel-Hub)
-    try:
-        from .satellite_service import satellite_service
-    except ImportError:
-        from satellite_service import satellite_service
-
-    
-    # 1. Fetch Real-World Satellite Indices
-    res = satellite_service.get_crop_indices(req.lat, req.lon, buffer=0.005)
-    
-    base_ndvi = res["indices"]["ndvi"]
-    evi = res["indices"]["evi"]
-    savi = res["indices"]["savi"]
-    health_score = int(base_ndvi * 100)
-    
-    health_label = (
-        "EXCELLENT" if base_ndvi > 0.75
-        else "GOOD" if base_ndvi > 0.55
-        else "MODERATE" if base_ndvi > 0.35
-        else "STRESSED"
-    )
-
-    # 14-day NDVI trend
-    trend = []
-    for i in range(14, 0, -1):
-        d = (datetime.now() - timedelta(days=i)).strftime("%d %b")
-        v = round(base_ndvi + random.uniform(-0.08, 0.08), 3)
-        trend.append({"date": d, "ndvi": max(0.1, min(1.0, v))})
-
-    # Anomaly detection
-    anomalies = []
-    if base_ndvi < 0.4:
-        anomalies.append("🔴 Low biomass density — possible crop failure zone detected in NW quadrant")
-    if random.random() > 0.65:
-        anomalies.append("🟡 Irregular spectral signature in ~0.3 acres — possible waterlogging or pest damage")
-    if random.random() > 0.8:
-        anomalies.append("🔴 Boundary stress detected — edge rows showing chlorophyll decline")
-
-    # AI interpretation prompt
-    sys_prompt = "You are an expert satellite imagery analyst for Indian precision agriculture."
-    prompt = (
-        f"Analyze satellite crop health data for a {req.crop} field at lat={req.lat}, lon={req.lon} "
-        f"({req.area_acres} acres) in {lang_name}:\n"
-        f"NDVI: {base_ndvi} ({health_label}), EVI: {evi}, SAVI: {savi}\n"
-        f"Anomalies: {'; '.join(anomalies) if anomalies else 'None detected'}\n\n"
-        f"Provide: 1) Crop Health Interpretation 2) Risk Areas 3) Recommended Immediate Actions "
-        f"4) Optimal Harvest Window estimate 5) Field Management Tips. Be specific with NDVI values."
-    )
-    ai_analysis = get_llm_response(prompt=prompt, system_prompt=sys_prompt)
-
-    return {
-        "location": {"lat": req.lat, "lon": req.lon},
-        "crop": req.crop,
-        "area_acres": req.area_acres,
-        "health_score": health_score,
-        "health_label": health_label,
-        "indices": {
-            "ndvi": base_ndvi,
-            "evi": evi,
-            "savi": savi,
-        },
-        "ndvi_14day_trend": trend,
-        "anomalies_detected": anomalies,
-        "ai_analysis": ai_analysis,
-        "data_source": res["data_source"],
-        "last_overpass": (datetime.now() - timedelta(days=random.randint(1, 5))).strftime("%d %b %Y"),
-        "next_overpass": (datetime.now() + timedelta(days=random.randint(2, 7))).strftime("%d %b %Y"),
-    }
 
 
 
@@ -1637,94 +1510,6 @@ def dispatch_custom_notification(req: CustomNotificationRequest):
     )
 
 # ============================================================
-# MODULE 17: REAL-TIME MARKET PRICES & MSP MANDI BENCHMARKS
-# ============================================================
-
-MSP_DATA = {
-    "wheat": {"msp": 2275, "unit": "quintal", "base": 2290},
-    "rice": {"msp": 2183, "unit": "quintal", "base": 2230},
-    "cotton": {"msp": 6620, "unit": "quintal", "base": 6850},
-    "mustard": {"msp": 5650, "unit": "quintal", "base": 5740},
-    "soybean": {"msp": 4600, "unit": "quintal", "base": 4720},
-    "maize": {"msp": 2090, "unit": "quintal", "base": 2150},
-    "arhar": {"msp": 7000, "unit": "quintal", "base": 7350},
-    "groundnut": {"msp": 6377, "unit": "quintal", "base": 6510},
-}
-
-STATE_MANDIS = {
-    "Punjab": ["Khanna Mandi", "Ludhiana APMC", "Jalandhar Mandi", "Bathinda Grain Market"],
-    "Maharashtra": ["Lasalgaon APMC", "Nagpur Mandi", "Pune Market Yard", "Amravati APMC"],
-    "Uttar Pradesh": ["Kanpur Mandi", "Varanasi APMC", "Agra Grain Market", "Bareilly Mandi"],
-    "Madhya Pradesh": ["Indore APMC", "Bhopal Mandi", "Ujjain Krishi Upaj", "Sehore Mandi"],
-    "Rajasthan": ["Kota Mandi", "Jaipur Terminal", "Bikaner Mandi", "Sri Ganganagar Yard"],
-    "Gujarat": ["Unjha Mandi", "Rajkot APMC", "Gondal Market Yard", "Ahmedabad APMC"],
-    "Karnataka": ["Shimoga APMC", "Dharwad Mandi", "Mysuru APMC", "Ballari Grain Market"],
-    "Andhra Pradesh": ["Guntur Market Yard", "Kurnool Mandi", "Vijayawada APMC"],
-    "West Bengal": ["Burdwan Mandi", "Siliguri Regulated Market", "Midnapore APMC"]
-}
-
-@app.get("/api/market-prices")
-def get_market_prices(
-    commodity: str = Query("wheat", description="Crop commodity name"),
-    state: str = Query("Punjab", description="State name"),
-    lang: str = Query("en", description="Language code")
-):
-    """
-    Returns authentic Mandi APMC prices, MSP benchmarks, and 7-day trend history.
-    """
-    c_key = commodity.lower().strip()
-    c_info = MSP_DATA.get(c_key, {"msp": 2200, "unit": "quintal", "base": 2250})
-    base_price = c_info["base"]
-    msp = c_info["msp"]
-
-    # Select regional mandis
-    mandis = STATE_MANDIS.get(state, ["Central District APMC", "Regional Grain Yard", "State Primary Mandi"])
-    
-    # Generate 7-day trend
-    from datetime import datetime, timedelta
-    trend = []
-    now = datetime.now()
-    for i in range(6, -1, -1):
-        dt = now - timedelta(days=i)
-        offset = int(np.sin(i * 1.5) * 25 + (6 - i) * 5)
-        trend.append({
-            "date": dt.strftime("%d %b"),
-            "price": base_price - 20 + offset
-        })
-
-    # Generate market centers
-    market_centers = []
-    for idx, mandi in enumerate(mandis):
-        var = (idx * 15) - 10
-        m_price = base_price + var
-        market_centers.append({
-            "market": mandi,
-            "price": m_price,
-            "min_price": m_price - 40,
-            "max_price": m_price + 35,
-            "change_pct": round(((m_price - base_price) / base_price) * 100, 1)
-        })
-
-    insights = [
-        f"Official MSP benchmark stands firmly supported at ₹{msp} / {c_info['unit']}.",
-        f"Mandi arrivals across {state} indicate stable trading volumes with active procurement.",
-        "Strategic Advice: Grade clean produce to capture top-band APMC price premiums above MSP."
-    ]
-
-    return {
-        "commodity": commodity.capitalize(),
-        "state": state,
-        "current_price_inr": base_price,
-        "unit": c_info["unit"],
-        "msp": msp,
-        "trend": trend,
-        "market_centers": market_centers,
-        "market_insights": insights,
-        "source": "live",
-        "last_updated": now.strftime("Today %H:%M")
-    }
-
-# ============================================================
 # MODULE 18: CLIMATE MAP AI CROP RISK ASSESSMENT
 # ============================================================
 
@@ -1738,7 +1523,7 @@ class CropRiskRequest(BaseModel):
 @app.post("/api/crop-risk")
 def calculate_crop_risk(req: CropRiskRequest):
     """
-    Computes geospatial climate crop risk index for the interactive satellite map.
+    Computes geospatial climate crop risk index for the interactive climate map.
     """
     # Evaluate risk score based on crop and regional climate indicators
     score = 38

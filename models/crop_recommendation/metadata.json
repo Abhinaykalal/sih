@@ -5,7 +5,7 @@
   "dataset_name": "Precision Agriculture Crop Recommendation Dataset",
   "dataset_version": "1.0",
   "artifact_path": "mlbackend/model.joblib",
-  "artifact_checksum": "5ecea483b806aa0e6f1708d8535d1ed26c2693e4ed0e045ed6719742daaef05e",
+  "artifact_checksum": "032ddf490723028e2f14bf2de7f3ef6516314c7d1811fcf9940af7e095cb8c82",
   "classes_count": 22,
   "classes": [
     "apple",
@@ -40,7 +40,7 @@
     "ph",
     "rainfall"
   ],
-  "training_date": "2026-09-11T06:53:27.574311+00:00",
+  "training_date": "2026-09-15T18:01:14.178829+00:00",
   "model_status": "REAL_VERIFIED",
   "field_validation_required": false,
   "known_limitations": [

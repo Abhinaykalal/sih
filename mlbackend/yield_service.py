@@ -95,15 +95,10 @@ def predict_yield(data: YieldInput) -> dict:
     total_yield = round(predicted_yield_per_acre * data.field_size, 1)
 
     unit = "quintals" if crop not in ["sugarcane"] else "quintals"
-    msp_approx = {
-        "rice": 2183, "wheat": 2275, "maize": 1962, "cotton": 6620,
-        "soybean": 4600, "groundnut": 6377, "sugarcane": 315, "tomato": 800
-    }
-    revenue_est = round(total_yield * msp_approx.get(crop, 2000))
 
     summary = (
         f"Expected yield for {data.field_size} acres of {data.crop.capitalize()} ({data.seed_variety} variety): "
-        f"~{total_yield} {unit} (≈ ₹{revenue_est:,} at MSP rates)."
+        f"~{total_yield} {unit}."
     )
 
     return {
@@ -113,7 +108,6 @@ def predict_yield(data: YieldInput) -> dict:
         "predicted_yield_per_acre": predicted_yield_per_acre,
         "total_yield": total_yield,
         "unit": unit,
-        "estimated_revenue_inr": revenue_est,
         "efficiency_factor": round(efficiency_factor, 2),
         "advice": advice,
         "summary": summary

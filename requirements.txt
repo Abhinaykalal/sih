@@ -7,7 +7,6 @@ google-generativeai
 requests
 httpx
 pydantic-settings
-sentinelhub
 gTTS
 python-dotenv
 python-multipart

@@ -18,7 +18,7 @@ if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
 from risk_engine import compute_4zone_farm_status, evaluate_smart_irrigation, evaluate_multimodal_disease_context
-from vision_ai_model import local_vision_ai, extract_leaf_features_from_image
+from vision_ai_model import local_vision_ai, validate_leaf_image, extract_vision_features
 from database import get_all_zones_recent_history, get_telemetry_history
 
 def run_tests():
@@ -48,21 +48,22 @@ def run_tests():
     assert "Nitrogen" in n_def["diagnosis"], f"Expected Nitrogen deficiency, got: {n_def['diagnosis']}"
     print(f"  Passed! Diagnosis: {n_def['diagnosis']}")
 
-    print("[TEST 4] Testing Real Image Feature Extraction with PIL...")
-    # Create an in-memory test image (yellowish-green leaf simulation)
-    test_img = Image.new("RGB", (100, 100), color=(180, 200, 40))
+    print("[TEST 4] Testing Real Image Validation & Feature Extraction...")
+    # Create an in-memory test image (green leaf simulation)
+    test_img = Image.new("RGB", (200, 200), color=(40, 180, 50))
     buf = io.BytesIO()
     test_img.save(buf, format="JPEG")
     img_bytes = buf.getvalue()
 
-    features = extract_leaf_features_from_image(img_bytes)
-    assert "yellowing" in features and "greenness" in features, "Features missing keys"
-    print(f"  Passed! Extracted: Greenness={features['greenness']}, Yellowing={features['yellowing']}, Texture={features['texture']}")
+    val_res = validate_leaf_image(img_bytes)
+    feat_vec = extract_vision_features(img_bytes)
+    assert feat_vec is not None and len(feat_vec) > 0, "Feature vector is empty"
+    print(f"  Passed! Valid: {val_res['valid']}, Feature Vector Length: {len(feat_vec)}")
 
-    print("[TEST 5] Testing Vision AI Diagnosis with Image Bytes...")
-    diag_res = local_vision_ai.diagnose(image_bytes=img_bytes, soil_moisture=30.0, humidity=65.0)
-    assert "diagnosis" in diag_res, "Diagnosis missing"
-    print(f"  Passed! AI Verdict: {diag_res['diagnosis']} ({diag_res['confidence_pct']}%)")
+    print("[TEST 5] Testing Safe Vision AI Diagnosis...")
+    diag_res = local_vision_ai.diagnose(image_bytes=img_bytes)
+    assert "status" in diag_res, "Status missing"
+    print(f"  Passed! Vision Status: {diag_res['status']}")
 
     print("[TEST 6] Testing Database Historical Telemetry...")
     hist = get_all_zones_recent_history(limit_per_zone=10)

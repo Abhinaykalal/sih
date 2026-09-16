@@ -11,9 +11,18 @@ Multi-model AI orchestrator with:
 - Structured JSON output with granular data provenance
 """
 
+import os
+import sys
 import time
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+ROOT_DIR = os.path.dirname(CURRENT_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 try:
     from model_providers import (
@@ -73,7 +82,7 @@ except ImportError:
         def get_forecast(lat, lon): return {}
         def ml_detect_language(t): return "en"
         def translate_to_english(t, l): return t, False
-        def build_multilingual_response(r, l, g=True): return r
+        def build_multilingual_response(english_response, lang_code, greeting=True): return english_response
 
         class EvidenceItem(BaseModel):
             type: str
