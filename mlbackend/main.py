@@ -2227,17 +2227,16 @@ def api_ai_chat(
         err_status = getattr(e, "status_code", 503)
         logger.warning(f"[{req_id}] Ollama unavailable or model missing ({err_code}): {err_msg}. Falling back to grounded RAG knowledge synthesis.")
         try:
-            from agent_orchestrator import agent_orchestrator as orch
+            from agent_orchestrator import agent_orchestrator as orch, AgentChatRequest
             if orch:
-                res = orch.process(
-                    query=query,
+                agent_req = AgentChatRequest(
+                    message=query,
                     crop="Rice",
                     stage="Vegetative",
                     field_id="zone-1-north-field",
-                    include_sensor=req.include_sensor_context,
-                    include_weather=req.include_weather_context,
                     user_id="anonymous"
                 )
+                res = orch.process_query(agent_req)
                 citations = [{"source": ev.title, "relevance": ev.confidence} for ev in res.evidence] if res.evidence else []
                 return AIChatResponse(
                     response=res.answer,
