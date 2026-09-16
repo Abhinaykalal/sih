@@ -1,241 +1,146 @@
-# AgriSaathi AI — Precision Agriculture Platform
+# AgriSaathi AI — SIH Precision Agriculture Prototype
 
-> **Full-stack AI-powered precision agriculture system** with ESP32 IoT telemetry, multilingual RAG (ICAR/IMD/FAO), hybrid LLM inference (Ollama local + Groq cloud), FastAPI backend, and a React Native Android app.
+> **Reality-first status:** this repository contains a substantial FastAPI + React Native prototype with experimental ML/RAG/IoT components. Not every advertised capability is production-verified. The status below intentionally distinguishes implemented code from experimentally validated or hardware-dependent behavior.
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![React Native](https://img.shields.io/badge/React%20Native-Expo-61DAFB?logo=react)](https://expo.dev)
-[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python)](https://python.org)
+## Capability status
 
----
-
-## Features
-
-| Module | Description |
-|---|---|
-| **Sensor Dashboard** | Live ESP32 telemetry — soil moisture, NPK, temperature, humidity, pH |
-| **Smart Pump Control** | 4-stage MQTT command lifecycle with rain lockout safety gate |
-| **AI Chat** | Multilingual RAG (EN/HI/TE) grounded on ICAR/IMD/FAO verified docs |
-| **Crop Recommendation** | ML model with 22 crops, live telemetry pre-fill |
-| **Leaf Vision** | Image-based disease detection |
-| **Alerts System** | Real-time agronomic anomaly notifications |
-| **Offline Mode** | Full offline queue with background sync via AsyncStorage |
-
----
+| Area | Repository status | Reality boundary |
+|---|---|---|
+| FastAPI backend | IMPLEMENTED | Multiple routes are present; deployment still requires environment configuration and endpoint-level testing. |
+| React Native Android app | IMPLEMENTED | App screens/services exist; full device validation is still required. |
+| Crop recommendation | EXPERIMENTAL | A scikit-learn artifact is loaded when present. Reported confidence is per-input prediction confidence, not test accuracy. |
+| Leaf vision | EXPERIMENTAL | `vision_ai_model.py` validates images and accepts only the repository's approved HOG/SVM artifact format. No diagnosis is returned if the compatible artifact is unavailable. |
+| RAG | EXPERIMENTAL | RAG code exists, but the repository does not establish a complete reproducible production document-ingestion/vector-store benchmark. |
+| MQTT | IMPLEMENTED TRANSPORT | Backend now uses a real MQTT client and refuses to report publication when disconnected. Broker credentials and a reachable broker are required. |
+| Pump command lifecycle | EXPERIMENTAL / HARDWARE-DEPENDENT | Backend records requested/published/acknowledged/executed states, but physical execution requires a real device reporting the corresponding state. |
+| ESP32 telemetry | PROTOTYPE | Firmware and telemetry paths exist, but real sensor calibration, device identity, TLS/authentication, and hardware-in-the-loop validation are not established by this repository alone. |
+| Edge crop guard | RULE-BASED | `tinyml_crop_guard.h` contains transparent deterministic heuristics. It is **not** a trained TinyML model and makes no accuracy claim. |
+| Offline storage | IMPLEMENTED LOCALLY | SQLite/in-memory mechanisms exist. A single durable production source of truth still needs to be established. |
+| Production readiness | NOT VERIFIED | Security, cloud configuration, real hardware, model evaluation, load testing, observability, and deployment validation remain required. |
 
 ## Architecture
 
-```
-Android App (Expo/React Native)
-    │
-    ├─ ApiClient.ts → FastAPI backend (local or Render)
-    │
-FastAPI Backend (mlbackend/)
-    ├─ /api/ai/chat       → HybridLLMProvider → [Ollama | Groq | RAG_ONLY]
-    ├─ /api/ai/rag/query  → MultilingualRAGService (ICAR/IMD/FAO docs)
-    ├─ /api/sensor/       → ESP32 telemetry + Supabase
-    ├─ /api/pump/         → PumpController (safety-gated, MQTT)
-    ├─ /api/crop/         → Scikit-learn ML model
-    └─ /health            → Health probe
-
-ESP32 (edge_hardware/)
-    └─ MQTT → FastAPI → Supabase → Android
+```text
+React Native Android
+        |
+        | HTTPS + authenticated API calls
+        v
+FastAPI backend (mlbackend/)
+   |       |        |        |
+   |       |        |        +--> ML / vision / decision support
+   |       |        +-----------> RAG / LLM services
+   |       +--------------------> SQLite / optional Supabase
+   +----------------------------> MQTT broker <--> ESP32 node
 ```
 
----
+## Quick start
 
-## Quick Start
+### Backend
 
-### 1. Clone the repository
 ```bash
-git clone https://github.com/Abhinaykalal/sih.git
-cd sih
-```
-
-### 2. Backend Setup
-```bash
-# Create virtual environment
 python -m venv venv
-venv\Scripts\activate   # Windows
-# source venv/bin/activate  # Linux/Mac
-
-# Install dependencies
+# Windows: venv\\Scripts\\activate
+# Linux/macOS: source venv/bin/activate
 pip install -r requirements.txt
 
-# Configure environment
-cp .env.example .env.local
-# Edit .env.local with your Supabase URL, API keys, etc.
-
-# Start the backend
+# Create a local environment file from the template and configure it.
+# Do not commit real credentials.
 python -m uvicorn mlbackend.main:app --host 127.0.0.1 --port 8000 --reload
-# API docs: http://127.0.0.1:8000/docs
-# Health:   http://127.0.0.1:8000/health
 ```
 
-### 3. Ollama Setup (Local AI — Development Only)
-```bash
-# Install Ollama from https://ollama.com
-# Pull the recommended model
-ollama pull qwen2.5:7b-instruct
+The interactive API documentation is available from the running FastAPI service at `/docs`.
 
-# Ollama runs automatically on http://127.0.0.1:11434
-# The backend detects it at startup
-```
+### Android
 
-### 4. RAG Knowledge Base
-The RAG system indexes verified documents automatically at startup from `data/rag/`.
-To re-index manually:
-```bash
-POST http://127.0.0.1:8000/api/ai/rag/reindex
-```
-
-### 5. Android App Setup
 ```bash
 cd android-app
 npm install
-
-# For Expo Go (physical device):
 npx expo start
-
-# For debug APK build:
-cd android
-.\gradlew clean assembleDebug
-# APK → android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 6. Configure Backend URL in App
-In the app → **Settings** → **Backend URL**, enter:
-- **Emulator**: `http://10.0.2.2:8000`
-- **Physical device (same WiFi)**: `http://<your-LAN-IP>:8000`
-- **Cloud (Render)**: `https://agrisaathi-api.onrender.com`
+Configure the backend URL in the app for your emulator, local network, or deployed API. Do not assume a particular cloud hostname unless your deployment actually uses it.
 
----
+## Environment and security
 
-## Environment Variables
+Use `.env.example` as the configuration reference. Production deployments should provide, at minimum, the authentication secret and explicitly configured CORS origins. MQTT credentials and TLS settings must be supplied through environment variables.
 
-See [`.env.example`](.env.example) for a full list. Key variables:
+The repair branch defaults to JWT enforcement and rejects wildcard CORS configuration. Development authentication bypass is permitted only when both development flags are explicitly enabled.
 
-| Variable | Description |
-|---|---|
-| `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_KEY` | Supabase anon or service-role key |
-| `GROQ_API_KEY` | Groq cloud LLM key (for Render deployment) |
-| `GROQ_MODEL` | Groq model name (default: `llama-3.1-8b-instant`) |
-| `OLLAMA_BASE_URL` | Ollama server URL (default: `http://127.0.0.1:11434`) |
-| `OPENWEATHER_API_KEY` | OpenWeatherMap API key |
+Never put passwords, JWT secrets, API keys, Wi-Fi credentials, or device secrets in source control. ESP32 credentials belong in the ignored `edge_hardware/secrets.h`, based on `edge_hardware/secrets.example.h`.
 
----
+## Crop recommendation
 
-## LLM Provider Logic
+The crop recommendation endpoint uses the available `model.joblib` artifact when it can be loaded. Its response contains a **prediction confidence** calculated from the model's output probabilities. The API does not treat a hard-coded number as test accuracy.
 
-The backend auto-selects the best available provider at runtime:
+A genuine benchmark should be generated from a versioned held-out evaluation set and recorded with the model artifact, dataset provenance, split strategy, and reproducible evaluation command.
 
-```
-1. Ollama (if reachable at OLLAMA_BASE_URL)  → used in local development
-2. Groq  (if GROQ_API_KEY is set)           → used on Render/cloud
-3. RAG_ONLY (honest fallback)               → returns source-backed excerpts
-                                               with full ICAR/IMD/FAO citations
-```
+## Leaf vision
 
-The active provider is always reported in `/api/ai/status` and each AI response. **No API key is ever returned in any API response or logged.**
+The vision path is deliberately conservative:
 
----
+1. Decode and size-check the uploaded image.
+2. Run a leaf-like image quality/scope gate.
+3. Load only an artifact with the approved `agrisaathi_vision_hog_svm_v1` type.
+4. Verify feature compatibility.
+5. Return `NO_RELIABLE_RESULT` below the configured confidence threshold.
+6. Return `MODEL_UNAVAILABLE` instead of inventing a diagnosis when the compatible artifact is missing.
 
-## Cloud Deployment (Render)
+The repository should not claim a disease benchmark unless the dataset, training run, held-out test results, and field validation are reproducible.
 
-1. Push this repo to GitHub
-2. Go to [render.com](https://render.com) → **New Web Service** → connect your GitHub repo
-3. Render auto-detects `render.yaml`
-4. Add secret env vars in Render Dashboard → Environment:
-   - `GROQ_API_KEY`
-   - `SUPABASE_URL`
-   - `SUPABASE_KEY`
-   - `OPENWEATHER_API_KEY`
-5. Deploy → your API will be at `https://agrisaathi-api.onrender.com`
+## MQTT and pump safety
 
----
+MQTT publication is a real transport operation. A disconnected backend raises an error rather than returning a fake `published` status.
 
-## API Endpoints
+The pump controller is a safety-gated command layer. Physical execution must be confirmed by telemetry from the device; a mobile UI timeout is not evidence of physical execution. Rain lockout is not intended to be bypassed through a client-side override.
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Health probe |
-| `/api/ai/status` | GET | Provider status + RAG stats |
-| `/api/ai/chat` | POST | Grounded multilingual AI chat |
-| `/api/ai/rag/query` | POST | Direct RAG query |
-| `/api/ai/rag/sources` | GET | Indexed document list |
-| `/api/sensor/telemetry/{device_id}` | GET | Live sensor data |
-| `/api/pump/state/{device_id}` | GET | Pump state |
-| `/api/pump/command` | POST | Dispatch pump command |
-| `/api/crop/recommend` | POST | ML crop recommendation |
-| `/api/notifications/` | GET | Farm alerts |
+The LLM/RAG layer must never be treated as the authority for physical actuator state.
 
-Full Swagger docs: `http://localhost:8000/docs`
+## Dataset provenance
 
----
+`mlbackend/dataset_pipeline.py` now reports only evidence observable from an actual dataset manifest. It does not manufacture sample counts, duplicate-removal counts, leakage scores, accuracy, F1, precision, recall, or latency.
 
-## Safety Guarantees
+If `datasets/vision/vision_manifest.csv` is absent, the dataset report is `NOT_AVAILABLE` rather than `VALIDATED`.
 
-- **Pump safety**: The LLM has zero authority over pump actuation. All commands require user confirmation and are dispatched only through `pump_controller.py` with hardware-enforced rain lockout.
-- **No hallucination**: If RAG returns 0 chunks, response is `UNAVAILABLE` — never fabricated content.
-- **No key leakage**: API keys are loaded exclusively from environment variables and never appear in responses, logs, or source code.
+## Testing
 
----
-
-## Test Suite
+Run the repair contract tests with:
 
 ```bash
-# RAG + Ollama integration tests (12 tests)
-python -m pytest mlbackend/test_rag_ollama.py -v
-
-# Full integration suite (44 tests)
-python -m pytest mlbackend/test_integration.py -v
-
-# RAG data leakage check
-python mlbackend/check_rag_leakage.py
+python -m pytest mlbackend/tests/test_repair_contracts.py -v
 ```
 
----
+Additional existing test suites can be run when their external services and dependencies are configured. Test counts in this README are intentionally not presented as a guarantee of passing end-to-end hardware behavior.
 
-## Project Structure
+## Hardware prototype
 
+The `edge_hardware/` directory contains ESP32-related prototype code. Hardware-dependent claims require:
+
+- a real board and identified sensor modules;
+- calibrated sensor conversion constants;
+- provisioned device credentials;
+- a reachable MQTT broker;
+- authenticated telemetry;
+- hardware-in-the-loop tests;
+- confirmation that reported actuator state reflects the physical device.
+
+The edge crop guard is explicitly rule-based. It should not be described as trained TinyML without a reproducible training artifact and evaluation evidence.
+
+## Repository structure
+
+```text
+mlbackend/       FastAPI backend, AI services, database and control logic
+android-app/     React Native / Expo application
+edge_hardware/   ESP32 prototype firmware and configuration examples
+data/            Application/RAG data locations
+models/          Model metadata and model-card material
+docs/             Project documentation and validation material
+.github/          CI workflows
 ```
-agrisaathi-sih/
-├── mlbackend/              # FastAPI backend
-│   ├── main.py             # Routes + middleware
-│   ├── llm_provider.py     # Hybrid LLM (Ollama/Groq/RAG_ONLY)
-│   ├── rag_service.py      # Multilingual RAG
-│   ├── ollama_service.py   # Ollama wrapper
-│   ├── pump_controller.py  # Safety-gated pump control
-│   ├── db_layer.py         # Supabase + SQLite abstraction
-│   └── ...
-├── android-app/            # React Native Expo app
-│   └── src/
-│       ├── screens/        # All app screens
-│       ├── services/       # ApiClient, OfflineStore
-│       └── components/     # ProvenanceBadge, etc.
-├── data/rag/               # RAG training/validation/test splits
-├── edge_hardware/          # ESP32 firmware & MQTT configs
-├── docs/                   # Validation reports
-├── render.yaml             # Render.com deployment blueprint
-├── Dockerfile              # Docker container config
-└── .env.example            # Environment variables template
-```
 
----
+## Current development branch
 
-## Hardware (ESP32)
+The forensic repair work is being developed on `fix/agrisaathi-forensic-repair`. Changes should be validated against real dependencies and hardware before being represented as production-complete.
 
-The ESP32 node reads:
-- Soil moisture (capacitive sensor)
-- Temperature & humidity (DHT22)
-- Soil NPK (RS485 sensor)
-- Rain detection
+## Project purpose
 
-And publishes to the MQTT broker at topic `agrisaathi/esp32/{device_id}/telemetry`.
-
----
-
-## License
-
-This project is developed for Smart India Hackathon (SIH). All agricultural advisory content is sourced from ICAR, IMD, FAO, and PJTSAU verified extension publications.
+AgriSaathi is a Smart India Hackathon project/prototype exploring precision-agriculture decision support, sensor telemetry, agricultural knowledge retrieval, computer vision, and safe actuator integration.
