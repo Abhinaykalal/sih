@@ -124,6 +124,7 @@ def run_integration_tests():
     # 7. Safe Vision Inference Direct
     print("\n[7] Safe Vision Inference Direct")
     d, s = post("/api/vision-diagnose", {"image_base64": ""})
+    print("DEBUG RESPONSE:", d)
     test("Status 200", s == 200, str(s))
     test("Safe fallback returned without crashing", d.get("status") in ["INVALID_IMAGE", "MODEL_UNAVAILABLE", "NO_RELIABLE_RESULT", "SUCCESS", "UNAVAILABLE"] or "diagnosis" in d, str(d.get("status")))
 

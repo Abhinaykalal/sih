@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,187 +10,30 @@ import {
   Dimensions,
 } from 'react-native';
 import { theme } from '../styles/theme';
-import { ApiClient } from '../services/ApiClient';
-import { OfflineStore } from '../services/OfflineStore';
-import { loadFarmContext, getFarmContextSync, getZoneNames, FarmProfile } from '../services/FarmContext';
+
+
+
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
-interface SensorScreenProps {
-  onNavigate?: (screen: string) => void;
-}
+import { useNavigation } from '@react-navigation/native';
+import { useFarmTelemetry } from '../hooks/useFarmTelemetry';
 
-interface TelemetryData {
-  soil_moisture?: number | null;
-  soil_moisture_pct?: number | null;
-  temperature?: number | null;
-  temperature_c?: number | null;
-  humidity?: number | null;
-  humidity_pct?: number | null;
-  soil_n?: number | null;
-  soil_p?: number | null;
-  soil_k?: number | null;
-  soil_ph?: number | null;
-  battery_level?: number | null;
-  wifi_rssi?: number | null;
-  pump_state?: string | null;
-  rain_detected?: boolean | null;
-  rain_probability_pct?: number | null;
-  rain_forecast_mm?: number | null;
-  lockout_active?: boolean | null;
-  timestamp?: string | null;
-  provenance?: string;
-  source?: string;
-}
-
-export function SensorScreen({ onNavigate }: SensorScreenProps) {
-  const [farmProfile, setFarmProfile] = useState<FarmProfile>(getFarmContextSync());
-  const [selectedZone, setSelectedZone] = useState('');
-  const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
-  const [weatherData, setWeatherData] = useState<any>(null);
-  const [pumpStatus, setPumpStatus] = useState<string>('OFF');
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [isOffline, setIsOffline] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
-  const [liveAlerts, setLiveAlerts] = useState<any[]>([]);
-
-  useEffect(() => {
-    initFarmContext();
-  }, []);
-
-  useEffect(() => {
-    if (selectedZone || farmProfile.farm_id) loadDashboardData();
-  }, [selectedZone]);
-
-  const initFarmContext = async () => {
-    try {
-      const profile = await loadFarmContext();
-      setFarmProfile(profile);
-      const zones = getZoneNames(profile);
-      if (zones.length > 0 && !selectedZone) setSelectedZone(zones[0]);
-    } catch {
-      const zones = getZoneNames(farmProfile);
-      if (zones.length > 0 && !selectedZone) setSelectedZone(zones[0]);
-    }
-  };
-
-  const loadDashboardData = async () => {
-    setLoading(true);
-    try {
-      // 1. Fetch sensor telemetry from live backend
-      const deviceId = farmProfile.primary_device_id || 'ESP32_NODE_01';
-      const telRes = await ApiClient.sensor.getTelemetry(deviceId, 1);
-      const latest = Array.isArray(telRes)
-        ? telRes[0]
-        : (telRes?.history && telRes.history.length > 0
-            ? telRes.history[0]
-            : (telRes?.readings?.[0] || telRes?.latest || telRes));
-
-      // 2. Fetch live pump state
-      let currentPump = 'OFF';
-      try {
-        const pRes = await ApiClient.pump.getPumpState(deviceId);
-        if (pRes?.state?.reported_state) {
-          currentPump = pRes.state.reported_state;
-        }
-      } catch {
-        // Fallback to telemetry pump status if available
-        if (latest?.pump_active != null) {
-          currentPump = latest.pump_active ? 'ON' : 'OFF';
-        }
-      }
-      setPumpStatus(currentPump);
-
-      // 3. Fetch live weather advice
-      let liveWeather: any = null;
-      try {
-        if (farmProfile.lat && farmProfile.lon) {
-          const wRes = await ApiClient.weather.getWeatherAdvice(
-            farmProfile.lat, farmProfile.lon, farmProfile.active_crop || undefined
-          );
-          if (wRes) {
-            liveWeather = wRes;
-            setWeatherData(wRes);
-          }
-        }
-      } catch (wErr) {
-        // Weather unavailable
-      }
-
-      // Fetch live alerts
-      try {
-        const alertsRes = await ApiClient.notifications.getNotifications({ limit: 3, unread_only: true });
-        if (alertsRes?.notifications) {
-          setLiveAlerts(alertsRes.notifications.slice(0, 3));
-        }
-      } catch {
-        // Alerts unavailable
-      }
-
-      if (latest && (latest.soil_moisture_pct !== undefined || latest.soil_moisture !== undefined || latest.temperature_c !== undefined)) {
-        const rainProb = latest.rain_probability_pct ?? liveWeather?.rain_probability_pct ?? null;
-        const rainMm = latest.rain_forecast_mm ?? liveWeather?.rainfall_mm ?? null;
-        setTelemetry({
-          soil_moisture_pct: latest.soil_moisture_pct ?? latest.soil_moisture ?? null,
-          temperature_c: latest.temperature_c ?? latest.temperature ?? null,
-          humidity_pct: latest.humidity_pct ?? latest.humidity ?? null,
-          soil_n: latest.nitrogen ?? latest.soil_n ?? null,
-          soil_p: latest.phosphorus ?? latest.soil_p ?? null,
-          soil_k: latest.potassium ?? latest.soil_k ?? null,
-          soil_ph: latest.ph ?? latest.soil_ph ?? null,
-          battery_level: latest.battery_level ?? null,
-          wifi_rssi: latest.wifi_rssi ?? null,
-          pump_state: currentPump,
-          rain_detected: latest.rain_detected ?? null,
-          rain_probability_pct: rainProb,
-          rain_forecast_mm: rainMm,
-          lockout_active: rainProb != null ? rainProb >= 50 : false,
-          timestamp: latest.received_at || latest.timestamp || new Date().toISOString(),
-          provenance: latest.data_source || (latest.is_simulated ? 'SIMULATED' : 'LIVE_SENSOR'),
-        });
-        setIsOffline(false);
-        setLastSyncTime(new Date());
-        await OfflineStore.cacheSensorTelemetry(latest);
-      } else {
-        throw new Error('No telemetry packet returned by server');
-      }
-    } catch (e: any) {
-      const cached = await OfflineStore.getCachedSensorTelemetry();
-      if (cached?.data) {
-        setTelemetry(cached.data);
-        setIsOffline(true);
-      } else {
-        // Truthful state: Telemetry unavailable, zero fabricated data
-        setTelemetry({
-          soil_moisture_pct: null,
-          temperature_c: null,
-          humidity_pct: null,
-          soil_n: null,
-          soil_p: null,
-          soil_k: null,
-          soil_ph: null,
-          battery_level: null,
-          wifi_rssi: null,
-          pump_state: 'UNKNOWN',
-          rain_detected: null,
-          rain_probability_pct: null,
-          rain_forecast_mm: null,
-          lockout_active: false,
-          timestamp: null,
-          provenance: 'UNAVAILABLE',
-        });
-        setIsOffline(true);
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadDashboardData();
-  };
+export function SensorScreen() {
+  const navigation = useNavigation();
+  const {
+    farmProfile,
+    selectedZone,
+    setSelectedZone,
+    telemetry,
+    weatherData,
+    pumpStatus,
+    loading,
+    refreshing,
+    isOffline,
+    lastSyncTime,
+    liveAlerts,
+    refresh,
+  } = useFarmTelemetry();
 
   const formatRelativeTime = (isoString?: string | null) => {
     if (!isoString) return 'Just now';
@@ -216,7 +59,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       contentContainerStyle={styles.contentContainer}
       showsVerticalScrollIndicator={false}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} />
+        <RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[theme.colors.primary]} />
       }
     >
       {/* 1. Farm & Zone Selector (Horizontal Scroll with no clipping) */}
@@ -229,7 +72,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.zoneScroll} contentContainerStyle={styles.zoneScrollContent}>
-        {getZoneNames(farmProfile).map((zone) => (
+        {(farmProfile.zones.length > 0 ? farmProfile.zones.map(z => z.name) : ['All Zones']).map((zone) => (
           <TouchableOpacity
             key={zone}
             style={[styles.zoneChip, selectedZone === zone && styles.zoneChipActive]}
@@ -254,11 +97,11 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       {/* AI Chatbot Assistant Dashboard Banner */}
       <TouchableOpacity
         style={styles.aiChatBanner}
-        onPress={() => onNavigate?.('chat')}
+        onPress={() => navigation.navigate('Chat' as never)}
         activeOpacity={0.85}
       >
         <View style={styles.aiChatIconContainer}>
-          <Text style={styles.aiChatIconEmoji}>🤖</Text>
+          <Text style={styles.aiChatIconEmoji}>ðŸ¤–</Text>
         </View>
         <View style={{ flex: 1, marginLeft: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -272,7 +115,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
           </Text>
         </View>
         <View style={styles.aiChatArrowBtn}>
-          <Text style={styles.aiChatArrowText}>💬</Text>
+          <Text style={styles.aiChatArrowText}>ðŸ’¬</Text>
         </View>
       </TouchableOpacity>
 
@@ -332,9 +175,9 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
 
         <TouchableOpacity
           style={styles.actionBtnSecondary}
-          onPress={() => onNavigate && onNavigate('pump')}
+          onPress={() => navigation.navigate('Pump' as never)}
         >
-          <Text style={styles.actionBtnTextSecondary}>Manage Pump & Automation Rules ➔</Text>
+          <Text style={styles.actionBtnTextSecondary}>Manage Pump & Automation Rules âž”</Text>
         </TouchableOpacity>
       </View>
 
@@ -342,7 +185,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       <View style={styles.deviceStatusCard}>
         <View style={styles.deviceStatusRow}>
           <View style={styles.statusDotGreen} />
-          <Text style={styles.deviceStatusTitle}>ESP32 Node 01 • Online</Text>
+          <Text style={styles.deviceStatusTitle}>ESP32 Node 01 â€¢ Online</Text>
           <Text style={styles.deviceStatusTime}>{formatRelativeTime(telemetry?.timestamp)}</Text>
         </View>
         <View style={styles.deviceMetaRow}>
@@ -369,7 +212,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
           </Text>
           <Text style={styles.metricStatus}>
             {telemetry?.soil_moisture_pct && telemetry.soil_moisture_pct < 30
-              ? 'LOW — Irrigation Needed'
+              ? 'LOW â€” Irrigation Needed'
               : 'Adequate Moisture'}
           </Text>
         </View>
@@ -381,7 +224,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
             <ProvenanceBadge source={telemetry?.provenance || 'LIVE_SENSOR'} size="small" />
           </View>
           <Text style={styles.metricValue}>
-            {telemetry?.temperature_c != null ? `${telemetry.temperature_c.toFixed(1)}°C` : 'Unavailable'}
+            {telemetry?.temperature_c != null ? `${telemetry.temperature_c.toFixed(1)}Â°C` : 'Unavailable'}
           </Text>
           <Text style={styles.metricStatus}>Vegetative Range</Text>
         </View>
@@ -450,7 +293,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
             <View style={styles.cardAccentBar} />
             <Text style={styles.cardTitle}>Agronomic Alerts & Warnings</Text>
           </View>
-          <TouchableOpacity onPress={() => onNavigate && onNavigate('alerts')}>
+          <TouchableOpacity onPress={() => navigation.navigate('Alerts' as never)}>
             <Text style={styles.viewAllText}>View All</Text>
           </TouchableOpacity>
         </View>
@@ -507,7 +350,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
       <View style={styles.quickActionRow}>
         <TouchableOpacity
           style={styles.quickActionCard}
-          onPress={() => onNavigate && onNavigate('crop')}
+          onPress={() => navigation.navigate('CropRecommendation' as never)}
         >
           <View style={[styles.quickActionIcon, { backgroundColor: '#DCFCE7' }]}>
             <Text style={styles.quickActionIconText}>AI</Text>
@@ -518,7 +361,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
 
         <TouchableOpacity
           style={styles.quickActionCard}
-          onPress={() => onNavigate && onNavigate('vision')}
+          onPress={() => navigation.navigate('Vision' as never)}
         >
           <View style={[styles.quickActionIcon, { backgroundColor: '#FEF3C7' }]}>
             <Text style={styles.quickActionIconText}>IMG</Text>
@@ -529,7 +372,7 @@ export function SensorScreen({ onNavigate }: SensorScreenProps) {
 
         <TouchableOpacity
           style={styles.quickActionCard}
-          onPress={() => onNavigate && onNavigate('decision')}
+          onPress={() => navigation.navigate('Decision' as never)}
         >
           <View style={[styles.quickActionIcon, { backgroundColor: '#EDE9FE' }]}>
             <Text style={styles.quickActionIconText}>ADV</Text>

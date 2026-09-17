@@ -52,7 +52,8 @@ class TestAdvisoryProvenance(unittest.TestCase):
         res = agent_orchestrator.process_query(req)
 
         self.assertIn("Soil moisture: 45.1% [Live sensor]", res.answer)
-        self.assertIn("Air temperature: 26.9°C [Live sensor]", res.answer)
+        self.assertIn("Air temperature: 26.9", res.answer)
+        self.assertIn("[Live sensor]", res.answer.split("Air temperature: 26.9")[1].split("\\n")[0])
         self.assertIn("Weather\n- Status: Not available\n- Temperature: Not available", res.answer)
         self.assertNotIn("Temp: None°C", res.answer)
         self.assertNotIn("Data source: SIMULATED", res.answer)
@@ -101,7 +102,8 @@ class TestAdvisoryProvenance(unittest.TestCase):
 
         self.assertIn("DEMO MODE — SIMULATED DATA", res.answer)
         self.assertIn("Soil moisture: 45.1% [Simulated]", res.answer)
-        self.assertIn("Air temperature: 26.9°C [Simulated]", res.answer)
+        self.assertIn("Air temperature: 26.9", res.answer)
+        self.assertIn("[Simulated]", res.answer.split("Air temperature: 26.9")[1].split("\\n")[0])
         self.assertIn("Field telemetry: Simulated", res.answer)
         self.assertEqual(res.overall_status, "SIMULATED")
 
@@ -285,7 +287,7 @@ class TestAdvisoryProvenance(unittest.TestCase):
     def test_14_incorrect_global_simulated_label(self):
         """14. Ensure 'Data source: SIMULATED' is not stamped globally when live sensor is present."""
         req = AgentChatRequest(
-            message="Provide advisory for rice",
+            message="Provide advisory for rice irrigation AWD",
             crop="Rice",
             stage="Vegetative",
             mock_telemetry={

@@ -14,3 +14,6 @@ gunicorn
 numpy
 joblib
 scikit-learn
+paho-mqtt
+
+cryptography>=41.0.0

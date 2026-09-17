@@ -56,26 +56,17 @@ def validate_leaf_image(image_bytes: bytes) -> Dict[str, Any]:
         width, height = img.size
         if min(width, height) < MIN_IMAGE_SIDE:
             return {"valid": False, "status": "LOW_QUALITY_IMAGE", "reason": f"Image is too small ({width}x{height})."}
-        arr = np.asarray(img.resize((128, 128)), dtype=np.float32) / 255.0
-        r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
-        maxc, minc = arr.max(axis=2), arr.min(axis=2)
-        saturation = np.divide(maxc - minc, np.maximum(maxc, 1e-6))
-        green = (g > r * 1.03) & (g > b * 1.03) & (g > 0.16)
-        yellow = (r > 0.35) & (g > 0.35) & (b < 0.45) & (np.abs(r - g) < 0.28)
-        brown = (r > b * 1.12) & (g > b * 0.90) & (r < 0.78) & (g < 0.68) & (r > 0.12)
-        plant_mask = (green | yellow | brown) & (saturation > 0.12)
-        plant_ratio = float(np.mean(plant_mask))
-        largest_component = _largest_component_fraction(plant_mask)
-        gray = 0.299 * r + 0.587 * g + 0.114 * b
-        gx, gy = np.abs(np.diff(gray, axis=1)), np.abs(np.diff(gray, axis=0))
+        
+        # Pre-filter for completely blank/solid or extreme dark/light images
+        arr = np.array(img.convert("L"))
+        if arr.std() < 5.0 or arr.mean() < 40 or arr.mean() > 225:
+            return {"valid": False, "status": "NOT_A_LEAF", "reason": "Image lacks structural variance or is completely dark/blank."}
+            
         quality = {
-            "plant_ratio": round(plant_ratio, 4),
-            "largest_component_ratio": round(largest_component, 4),
-            "edge_density": round(float(np.mean(np.concatenate([gx.ravel(), gy.ravel()]) > 0.20)), 4),
-            "neutral_ratio": round(float(np.mean(saturation < 0.10)), 4),
+            "resolution": f"{width}x{height}",
+            "format": img.format or "UNKNOWN",
+            "variance": float(arr.std())
         }
-        if plant_ratio < 0.12 or largest_component < 0.06:
-            return {"valid": False, "status": "NOT_A_LEAF", "reason": "The image does not contain a sufficiently large contiguous leaf-like region.", "quality": quality}
         return {"valid": True, "status": "LEAF_IMAGE_ACCEPTED", "quality": quality}
     except Exception as exc:
         return {"valid": False, "status": "INVALID_IMAGE", "reason": f"Image could not be decoded: {exc}"}
@@ -141,13 +132,77 @@ class LocalVisionAIModel:
         if not os.path.exists(MODEL_PATH):
             print("[VISION] No real vision_model.joblib found; vision inference is UNAVAILABLE.")
             return
+            
+        import hashlib
+        import json
+        meta_path = os.path.join(os.path.dirname(MODEL_PATH), "vision_model_metadata.json")
+        
         try:
+            with open(MODEL_PATH, "rb") as f:
+                artifact_hash = hashlib.sha256(f.read()).hexdigest()
+                
+            if not os.path.exists(meta_path):
+                print("[VISION] Warning: Metadata missing. Loading model as UNVERIFIED.")
+                self.provenance = "UNVERIFIED"
+                self.version = "unknown"
+            else:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta_envelope = json.load(f)
+                    
+                if "signature" not in meta_envelope or "payload" not in meta_envelope:
+                    if os.environ.get("ENVIRONMENT") == "production":
+                        self.model_data = None
+                        print("[VISION] CRITICAL [AUTHENTICITY_FAILURE]: Missing signature in production environment.")
+                        return
+                    else:
+                        print("[VISION] Warning: Signature missing or invalid envelope. Loading model as UNVERIFIED.")
+                        self.provenance = "UNVERIFIED"
+                        self.version = "unknown"
+                        meta = meta_envelope.get("payload", meta_envelope) # Fallback to dict if old format
+                else:
+                    from mlbackend.crypto_utils import verify_metadata
+                        
+                    if not verify_metadata(meta_envelope["payload"], meta_envelope["signature"]):
+                        self.model_data = None
+                        print("[VISION] CRITICAL [AUTHENTICITY_FAILURE]: Invalid cryptographic signature on metadata.")
+                        return
+                    
+                    meta = meta_envelope["payload"]
+                    meta_hash = meta.get("artifact", {}).get("sha256")
+                    if meta_hash != artifact_hash:
+                        self.model_data = None
+                        print(f"[VISION] CRITICAL [MODEL_INTEGRITY_FAILURE]: Hash mismatch! Metadata {meta_hash} != Artifact {artifact_hash}")
+                        return
+                    
+                    dataset_hash = meta.get("dataset", {}).get("manifest_sha256")
+                    manifest_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "datasets", "vision", "vision_manifest.csv")
+                    
+                    if os.path.exists(manifest_path):
+                        with open(manifest_path, "rb") as mf:
+                            live_manifest_hash = hashlib.sha256(mf.read()).hexdigest()
+                        if dataset_hash != "untracked_dataset" and dataset_hash != live_manifest_hash:
+                            self.model_data = None
+                            print(f"[VISION] CRITICAL [DATASET_INTEGRITY_FAILURE]: Provenance mismatch! Live manifest {live_manifest_hash} != Trained {dataset_hash}")
+                            return
+                    elif dataset_hash != "untracked_dataset":
+                         self.model_data = None
+                         print(f"[VISION] CRITICAL [DATASET_INTEGRITY_FAILURE]: Provenance mismatch! Manifest missing but model expects {dataset_hash}")
+                         return
+                         
+                    self.provenance = "VERIFIED"
+                    self.version = meta.get("model_version", "unknown")
+                
             data = joblib.load(MODEL_PATH)
             if not isinstance(data, dict) or data.get("artifact_type") != ARTIFACT_TYPE:
                 raise ValueError("Artifact is not the approved real-image HOG/SVM format.")
             if not all(k in data for k in ("model", "classes", "feature_config", "metrics")):
                 raise ValueError("Artifact missing model/classes/feature_config/metrics.")
             self.model_data = data
+            self.model_data["version"] = getattr(self, "version", "unknown")
+            self.model_data["provenance"] = getattr(self, "provenance", "UNVERIFIED")
+        except json.JSONDecodeError as e:
+            self.model_data = None
+            print(f"[VISION] CRITICAL [INVALID_METADATA]: Metadata unparseable or malformed. {e}")
         except Exception as exc:
             self.model_data = None
             print(f"[VISION] Artifact rejected: {exc}")

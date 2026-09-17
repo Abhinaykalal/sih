@@ -33,31 +33,17 @@ def decode_supabase_jwt(token: str) -> Dict[str, Any]:
     Checks expiration, issuer, and signature.
     """
     secret = settings.SUPABASE_JWT_SECRET
-    
-    # 1. First check if it's a simulated development/test token
-    if token.startswith("test-token-") or token.startswith("dev-token-"):
-        parts = token.split("-")
-        role = parts[2] if len(parts) > 2 else "farmer"
-        return {
-            "sub": f"user-{parts[-1]}",
-            "email": f"{role}@agrisaathi.org",
-            "role": role,
-            "exp": int(time.time()) + 3600
-        }
 
     try:
         # Supabase default uses HS256 with project JWT secret
         unverified_header = jwt.get_unverified_header(token)
         alg = unverified_header.get("alg", "HS256")
-
-        # In development without actual secret, decode without verification if dev secret is placeholder
-        verify_signature = secret != "agrisaathi-dev-jwt-secret-do-not-use-in-production"
         
         payload = jwt.decode(
             token,
-            secret if verify_signature else None,
+            secret,
             algorithms=[alg],
-            options={"verify_signature": verify_signature, "verify_exp": True}
+            options={"verify_signature": True, "verify_exp": True}
         )
         return payload
     except jwt.ExpiredSignatureError:
@@ -75,21 +61,13 @@ def decode_supabase_jwt(token: str) -> Dict[str, Any]:
 
 async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)) -> UserPrincipal:
     """
-    Strict FastAPI dependency: requires valid Bearer token if ENFORCE_JWT_AUTH is true,
-    or falls back to default authenticated principal in local dev mode.
+    Strict FastAPI dependency: requires valid Bearer token.
     """
     if not credentials:
-        if settings.ENFORCE_JWT_AUTH:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing Authorization Bearer header.",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-        # Default local dev user
-        return UserPrincipal(
-            user_id="00000000-0000-0000-0000-000000000001",
-            email="farmer.dev@agrisaathi.org",
-            role="farmer"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization Bearer header.",
+            headers={"WWW-Authenticate": "Bearer"}
         )
     
     token = credentials.credentials

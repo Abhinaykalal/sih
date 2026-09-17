@@ -14,6 +14,8 @@ import sys
 import json
 import joblib
 import pandas as pd
+import uuid
+import hashlib
 from datetime import datetime, timezone
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report, confusion_matrix
 from sklearn.ensemble import RandomForestClassifier
@@ -68,18 +70,46 @@ def run(retrain: bool = False):
     print(f"  Recall:    {recall:.4f}")
     print(f"  F1 Score:  {f1:.4f}")
 
-    # Checksum of model
-    checksum = DatasetValidator.compute_sha256(MODEL_PATH)
+    # Calculate actual SHA256 of the saved artifact on disk
+    sha256_hash = ""
+    if os.path.exists(MODEL_PATH):
+        with open(MODEL_PATH, "rb") as f:
+            sha256_hash = hashlib.sha256(f.read()).hexdigest()
 
-    # 1. metadata.json
+    model_version = str(uuid.uuid4())
+
+    # Emit strict cryptographic provenance metadata
+    crop_metadata = {
+        "model_version": model_version,
+        "artifact": {
+            "filename": os.path.basename(MODEL_PATH),
+            "sha256": sha256_hash
+        },
+        "evaluation": {
+            "metric": "accuracy",
+            "value": accuracy,
+            "test_samples": len(y_test)
+        },
+        "training": {
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "dataset_version": "crop-dataset-v1",
+            "random_seed": 42
+        }
+    }
+    
+    metadata_path = os.path.join(os.path.dirname(MODEL_PATH), "crop_model_metadata.json")
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(crop_metadata, f, indent=2)
+
+    # Legacy metadata outputs for backwards compatibility
     metadata = {
         "model_name": "AgriSaathi Crop Recommendation Engine",
-        "version": "1.2.0-Production",
+        "version": model_version,
         "architecture": "RandomForestClassifier(n_estimators=100)",
         "dataset_name": "Precision Agriculture Crop Recommendation Dataset",
         "dataset_version": "1.0",
         "artifact_path": "mlbackend/model.joblib",
-        "artifact_checksum": checksum,
+        "artifact_checksum": sha256_hash,
         "classes_count": len(classes),
         "classes": classes,
         "features": ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"],
@@ -87,25 +117,12 @@ def run(retrain: bool = False):
         "model_status": "REAL_VERIFIED",
         "field_validation_required": False,
         "known_limitations": [
-            "Assumes water availability when recommending high-water crops (e.g., paddy rice, sugarcane)",
+            "Assumes water availability when recommending high-water crops",
             "Does not factor in dynamic daily agricultural commodity spot market prices"
         ]
     }
     with open(os.path.join(MODELS_DIR, "metadata.json"), "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
-
-    # 2. metrics.json
-    metrics = {
-        "accuracy": accuracy,
-        "precision_weighted": float(precision),
-        "recall_weighted": float(recall),
-        "f1_score_weighted": float(f1),
-        "test_samples_count": len(y_test),
-        "per_class_metrics": report_dict,
-        "confusion_matrix": cm
-    }
-    with open(os.path.join(MODELS_DIR, "metrics.json"), "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=2)
 
     # 3. training_config.json
     config = {
@@ -128,7 +145,7 @@ def run(retrain: bool = False):
 - **Weighted Precision**: **{precision:.4f}**
 - **Weighted Recall**: **{recall:.4f}**
 - **Weighted F1-Score**: **{f1:.4f}**
-- **Model Checksum (SHA-256)**: `{checksum}`
+- **Model Checksum (SHA-256)**: `{sha256_hash}`
 
 ## Verification Summary
 The model predicts the optimal crop choice based on chemical soil values (N, P, K), pH, and ambient weather telemetry.
@@ -156,7 +173,7 @@ python -m mlbackend.training.train_crop_recommendation
 
     print(f"  Artifacts saved to: {MODELS_DIR}")
     print("=========================================================\n")
-    return metrics
+    return crop_metadata
 
 if __name__ == "__main__":
     retrain_flag = "--retrain" in sys.argv

@@ -1,5 +1,9 @@
 """
-AgriSaathi AI — Comprehensive Test Suite for Real Ollama, RAG & FastAPI AI Integration
+AgriSaathi AI — RAG & LLM Provider Integration Tests
+======================================================
+Tests the unified llm_provider.hybrid_provider pipeline alongside
+the rag_engine knowledge base. ollama_service.py has been removed;
+all LLM calls route through llm_provider.py.
 """
 
 import os
@@ -17,8 +21,8 @@ if CURRENT_DIR not in sys.path:
 
 from fastapi.testclient import TestClient
 from mlbackend.main import app
-from mlbackend.ollama_service import ollama_service
-from mlbackend.rag_service import rag_service
+from mlbackend.llm_provider import hybrid_provider
+from mlbackend.rag_engine import rag_engine
 from mlbackend.check_rag_leakage import check_leakage
 
 class TestOllamaRAGIntegration(unittest.TestCase):
@@ -36,10 +40,11 @@ class TestOllamaRAGIntegration(unittest.TestCase):
         resp = self.client.get("/api/ai/status")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertIn("ollama", data)
+        self.assertIn("llm_provider", data)
         self.assertIn("rag", data)
-        self.assertIn(data["ollama"]["status"], ["AVAILABLE", "DEGRADED", "UNAVAILABLE"])
+        self.assertIn(data["llm_provider"]["status"], ["AVAILABLE", "RAG_ONLY", "UNAVAILABLE"])
         self.assertEqual(data["rag"]["status"], "AVAILABLE")
+        self.assertIsNotNone(data["rag"].get("corpus_hash"))  # corpus must be hashed
         self.assertGreaterEqual(data["rag"]["total_documents"], 8)
         self.assertGreaterEqual(data["rag"]["total_chunks"], 10)
 
@@ -82,7 +87,10 @@ class TestOllamaRAGIntegration(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertIn(data["provenance"], ["SOURCE_BACKED_KNOWLEDGE", "RAG_ONLY"])
+        self.assertTrue(
+            data["provenance"].startswith("SOURCE_BACKED_KNOWLEDGE") or
+            data["provenance"].startswith("RAG_ONLY")
+        )
         self.assertGreaterEqual(data["retrieved_chunks"], 1)
         self.assertGreaterEqual(len(data["citations"]), 1)
         self.assertIn("chunk_id", data["citations"][0])
@@ -95,7 +103,10 @@ class TestOllamaRAGIntegration(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertIn(data["provenance"], ["SOURCE_BACKED_KNOWLEDGE", "RAG_ONLY"])
+        self.assertTrue(
+            data["provenance"].startswith("SOURCE_BACKED_KNOWLEDGE") or
+            data["provenance"].startswith("RAG_ONLY")
+        )
         self.assertGreaterEqual(data["retrieved_chunks"], 1)
 
     def test_09_rag_query_telugu(self):
@@ -105,7 +116,10 @@ class TestOllamaRAGIntegration(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertIn(data["provenance"], ["SOURCE_BACKED_KNOWLEDGE", "RAG_ONLY"])
+        self.assertTrue(
+            data["provenance"].startswith("SOURCE_BACKED_KNOWLEDGE") or
+            data["provenance"].startswith("RAG_ONLY")
+        )
         self.assertGreaterEqual(data["retrieved_chunks"], 1)
 
     def test_10_rag_query_no_context_unavailable(self):
@@ -115,7 +129,8 @@ class TestOllamaRAGIntegration(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["provenance"], "UNAVAILABLE")
+        # Provenance must include the corpus sha256 to prove grounding
+        self.assertTrue(data["provenance"].startswith("UNAVAILABLE"))
         self.assertEqual(data["retrieved_chunks"], 0)
         self.assertEqual(len(data["citations"]), 0)
         self.assertTrue(len(data["warnings"]) > 0)

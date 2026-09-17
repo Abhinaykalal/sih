@@ -25,11 +25,11 @@ def run_edge_gateway():
             telemetry = {
                 "zone_id": 2,
                 "z1_moisture": round(random.uniform(40.0, 50.0), 1),
-                "z2_moisture": round(random.uniform(14.0, 18.0), 1), # Simulated Water Stress
-                "z3_pest_count": random.randint(22, 28),             # Simulated Pest Spike
-                "z4_humidity": round(random.uniform(88.0, 94.0), 1), # Simulated Fungal Saturation
+                "z2_moisture": round(random.uniform(14.0, 18.0), 1),
+                "z3_pest_count": None,             # No physical pest sensor exists
+                "z4_humidity": round(random.uniform(88.0, 94.0), 1), 
                 "air_temp": round(random.uniform(32.0, 36.0), 1),
-                "ec_salinity": round(random.uniform(1.0, 1.4), 1),
+                "ec_salinity": None,               # No physical EC sensor exists
                 "wind_speed": 8.0
             }
 

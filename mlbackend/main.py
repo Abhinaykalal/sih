@@ -41,41 +41,50 @@ try:
     from .model_registry import model_registry
     from .mqtt_service import mqtt_manager, parse_and_validate_telemetry_payload
     from .agent_orchestrator import agent_orchestrator, AgentChatRequest
-    from .model_providers import vision_provider, irrigation_provider, nutrient_provider
+    from .model_providers import  irrigation_provider, nutrient_provider
     from .dataset_pipeline import generate_dataset_quality_report
 except ImportError:
     try:
         from model_registry import model_registry
         from mqtt_service import mqtt_manager, parse_and_validate_telemetry_payload
         from agent_orchestrator import agent_orchestrator, AgentChatRequest
-        from model_providers import vision_provider, irrigation_provider, nutrient_provider
+        from model_providers import  irrigation_provider, nutrient_provider
         from dataset_pipeline import generate_dataset_quality_report
     except ImportError:
         model_registry = None
         mqtt_manager = None
         parse_and_validate_telemetry_payload = None
         agent_orchestrator = None
-        vision_provider = None
         irrigation_provider = None
         nutrient_provider = None
         generate_dataset_quality_report = None
+        from pydantic import BaseModel as _BaseModel
+        class AgentChatRequest(_BaseModel):
+            message: str
+            crop: str = "Rice"
+            stage: str = "Vegetative"
+            field_id: str = "field-01"
+            language: str = "en"
+            user_id: str = "anonymous"
+            session_id: str = "default"
+            demo_mode: bool = False
 
-# Ollama & Multilingual RAG Services
+# LLM Provider & RAG Services
+# All LLM inference (Ollama / Groq / RAG-only) routes through llm_provider.py.
+# ollama_service.py has been removed â€” it was a redundant standalone wrapper.
 try:
-    from .ollama_service import ollama_service, OllamaServiceStatus, OllamaInferenceResponse, OllamaServiceException, OllamaErrorCode
-    from .rag_service import rag_service, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
+    from .llm_provider import hybrid_provider, LLMProviderName, LLMInferenceResponse
+    from .rag_engine import rag_engine, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
     from .check_rag_leakage import check_leakage
 except ImportError:
     try:
-        from ollama_service import ollama_service, OllamaServiceStatus, OllamaInferenceResponse, OllamaServiceException, OllamaErrorCode
-        from rag_service import rag_service, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
+        from llm_provider import hybrid_provider, LLMProviderName, LLMInferenceResponse
+        from rag_engine import rag_engine, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
         from check_rag_leakage import check_leakage
     except ImportError:
-        ollama_service = None
-        rag_service = None
+        hybrid_provider = None
+        rag_engine = None
         check_leakage = None
-        OllamaServiceException = Exception
-        OllamaErrorCode = None
 
 # ESP32 Simulator, Conversation Memory & Multilingual
 try:
@@ -206,7 +215,7 @@ if settings.SUPABASE_URL and settings.SUPABASE_KEY:
     try:
         from supabase import create_client  # type: ignore
         supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        print("✓ Supabase Cloud Sync connected successfully.")
+        print("âœ“ Supabase Cloud Sync connected successfully.")
     except Exception as e:
         print(f"Notice: Supabase cloud sync inactive ({e}). Running in 100% offline local mode.")
         supabase_client = None
@@ -217,20 +226,61 @@ app = FastAPI(title="Agrisaathi AI - Core Intelligence Engine v2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+    allow_origins=settings.CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ---------- Load ML Model ----------
+import json
+import hashlib
+
 model = None
+crop_model_provenance = {
+    "status": "UNAVAILABLE",
+    "version": "unknown",
+    "accuracy": None,
+    "sha256": None
+}
+
 if ML_AVAILABLE:
     try:
         model_path = os.path.join(os.path.dirname(__file__), "model.joblib")
+        meta_path = os.path.join(os.path.dirname(__file__), "crop_model_metadata.json")
+        
         if os.path.exists(model_path):
-            model = joblib.load(model_path)
-            print("Crop recommendation model loaded successfully.")
+            # Compute artifact hash
+            with open(model_path, "rb") as f:
+                artifact_hash = hashlib.sha256(f.read()).hexdigest()
+            
+            crop_model_provenance["sha256"] = artifact_hash
+            
+            # Load metadata
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                        
+                    meta_hash = meta.get("artifact", {}).get("sha256")
+                    if meta_hash == artifact_hash:
+                        model = joblib.load(model_path)
+                        crop_model_provenance["status"] = "VERIFIED"
+                        crop_model_provenance["version"] = meta.get("model_version", "unknown")
+                        crop_model_provenance["accuracy"] = meta.get("evaluation", {}).get("value")
+                        print(f"Crop recommendation model loaded securely. Status: VERIFIED. Hash: {artifact_hash[:8]}")
+                    else:
+                        print(f"CRITICAL [MODEL_INTEGRITY_FAILURE]: Hash mismatch! Metadata {meta_hash} != Artifact {artifact_hash}")
+                        crop_model_provenance["status"] = "MODEL_INTEGRITY_FAILURE"
+                        model = None
+                except Exception as e:
+                    print(f"CRITICAL [INVALID_METADATA]: Metadata unparseable or malformed. {e}")
+                    crop_model_provenance["status"] = "INVALID_METADATA"
+                    model = None
+            else:
+                print("Warning: Metadata missing, loading model as UNVERIFIED.")
+                model = joblib.load(model_path)
+                crop_model_provenance["status"] = "UNVERIFIED"
     except Exception as e:
         print(f"Warning: Model load failed. {e}")
 
@@ -270,6 +320,7 @@ class RecommendationResponse(BaseModel):
     provenance: str = "MODEL_PREDICTION"
     prediction_timestamp: str
     request_id: str
+    artifact_hash: Optional[str] = None
     alternative_crops: List[AlternativeCrop] = []
     explanation: str
     warnings: List[str] = []
@@ -280,13 +331,56 @@ class GeoLangRequest(BaseModel):
 
 
 # ============================================================
+# INTERNAL HELPERS (thin wrappers used by several endpoints)
+# ============================================================
+
+def get_llm_response(prompt: str, system_prompt: str = "") -> str:
+    """
+    Convenience wrapper around hybrid_provider.generate().
+    Returns the text answer string, or a safe fallback message if the
+    LLM stack is unavailable.
+    """
+    if hybrid_provider is None:
+        return "LLM stack is not loaded. Advisory text unavailable."
+    system = system_prompt or "You are an expert agricultural advisor. Answer concisely and accurately."
+    result = hybrid_provider.generate(prompt=prompt, system=system)
+    return result.answer if result and result.answer else "No advisory text could be generated."
+
+
+def log_telemetry(zone_id: str, soil_moisture=None, soil_temp=None, air_temp=None,
+                  humidity=None, ec=None, pest_count=None):
+    """
+    Persist a sensor reading via db_layer.  Silently ignored if db_layer
+    is unavailable (e.g. tests running without a database).
+    """
+    if db_layer is None:
+        return
+    try:
+        db_layer.store_telemetry_packet({
+            "device_id": f"ESP32_ZONE_{zone_id}",
+            "received_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "telemetry": {
+                "zone_id": zone_id,
+                "soil_moisture_pct": soil_moisture,
+                "temperature_c": air_temp,
+                "soil_temp_c": soil_temp,
+                "humidity_pct": humidity,
+                "ec_ms_cm": ec,
+                "pest_count": pest_count,
+            },
+        })
+    except Exception as exc:
+        logger.warning("log_telemetry failed (non-fatal): %s", exc)
+
+
+# ============================================================
 # HEALTH CHECK
 # ============================================================
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {
-        "status": "Agrisaathi AI Core Engine v2.0 — Online",
+        "status": "Agrisaathi AI Core Engine v2.0 â€” Online",
         "modules": [
             "crop-recommend", "fertilizer-optimize", "weather-advice",
             "soil-health", "pest-disease", "yield-predict",
@@ -307,7 +401,7 @@ def health_check():
 # ============================================================
 # OLLAMA TUNNEL URL MANAGEMENT
 # Mobile app fetches this to get the current edge AI (Ollama)
-# endpoint — avoids hardcoding ephemeral tunnel URLs in the APK.
+# endpoint â€” avoids hardcoding ephemeral tunnel URLs in the APK.
 # ============================================================
 
 # In-memory store; updated at runtime via PUT /api/ollama/config
@@ -343,38 +437,7 @@ def update_ollama_config(payload: OllamaTunnelConfig):
 
 
 # ============================================================
-# LEAF AI — Vision Disease Diagnosis
-# POST /api/vision-diagnose
-# Accepts base64-encoded leaf image, returns HOG/SVM diagnosis.
-# ============================================================
 
-class VisionDiagnoseRequest(BaseModel):
-    image_base64: str
-    crop_type: Optional[str] = None
-    growth_stage: Optional[str] = None
-
-@app.post("/api/vision-diagnose")
-def vision_diagnose(payload: VisionDiagnoseRequest):
-    """Diagnose leaf disease from a base64-encoded crop leaf image."""
-    if local_vision_ai is None:
-        raise HTTPException(status_code=503, detail="Vision model service unavailable.")
-    if not payload.image_base64 or len(payload.image_base64) < 100:
-        raise HTTPException(status_code=400, detail="No valid image_base64 provided.")
-    try:
-        # Strip data URI prefix if present (data:image/jpeg;base64,...)
-        b64 = payload.image_base64
-        if "," in b64:
-            b64 = b64.split(",", 1)[1]
-        import base64 as _b64
-        image_bytes = _b64.b64decode(b64)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid base64 image data: {exc}")
-    result = local_vision_ai.diagnose(image_bytes=image_bytes)
-    # Attach metadata
-    result["crop_type"] = payload.crop_type
-    result["growth_stage"] = payload.growth_stage
-    result["diagnosed_at"] = datetime.now(timezone.utc).isoformat()
-    return result
 
 @app.get("/version")
 def version_info():
@@ -460,30 +523,50 @@ def recommend_crop(features: CropFeatures):
     ts = datetime.now(timezone.utc).isoformat()
 
     if not ML_AVAILABLE or not model:
+        # Check if the load failure was due to integrity failure or invalid metadata
+        is_tampered = crop_model_provenance["status"] == "MODEL_INTEGRITY_FAILURE"
+        is_invalid_meta = crop_model_provenance["status"] == "INVALID_METADATA"
+        
+        failure_status = "UNAVAILABLE"
+        if is_tampered:
+            failure_status = "MODEL_INTEGRITY_FAILURE"
+        elif is_invalid_meta:
+            failure_status = "INVALID_METADATA"
+            
+        explanation_msg = "Precision Crop Recommendation model is currently offline. Please refer to rule-based agricultural guidelines."
+        warning_msg = "âš ï¸ Model artifact not loaded."
+        if is_tampered:
+            explanation_msg = "Model integrity verification failed. Execution blocked."
+            warning_msg = "âš ï¸ Model artifact tampered."
+        elif is_invalid_meta:
+            explanation_msg = "Model metadata validation failed. Execution blocked."
+            warning_msg = "âš ï¸ Model metadata invalid or malformed."
+            
         return RecommendationResponse(
             recommended_crop="Unavailable",
             confidence=0.0,
             prediction_confidence=0.0,
             test_accuracy=None,
-            model_version="rf-crop-v1.2",
+            model_version="UNAVAILABLE",
             source="UNAVAILABLE",
-            provenance="UNAVAILABLE",
+            provenance=failure_status,
             prediction_timestamp=ts,
             request_id=req_id,
+            artifact_hash=crop_model_provenance["sha256"],
             alternative_crops=[],
-            explanation="Precision Crop Recommendation model is currently offline. Please refer to rule-based agricultural guidelines.",
-            warnings=["⚠️ Model artifact not loaded."]
+            explanation=explanation_msg,
+            warnings=[warning_msg]
         )
 
     # Input validation & sanitization
     warnings_list = []
     if features.ph < 5.0:
-        warnings_list.append("⚠️ Strongly acidic soil detected (pH < 5.0). Lime treatment recommended.")
+        warnings_list.append("âš ï¸ Strongly acidic soil detected (pH < 5.0). Lime treatment recommended.")
     elif features.ph > 8.5:
-        warnings_list.append("⚠️ Strongly alkaline soil detected (pH > 8.5). Gypsum treatment recommended.")
+        warnings_list.append("âš ï¸ Strongly alkaline soil detected (pH > 8.5). Gypsum treatment recommended.")
 
     if features.rainfall < 40.0:
-        warnings_list.append("⚠️ Low rainfall expected; supplementary irrigation will be essential.")
+        warnings_list.append("âš ï¸ Low rainfall expected; supplementary irrigation will be essential.")
 
     data = np.array([[features.N, features.P, features.K,
                       features.temperature, features.humidity,
@@ -510,7 +593,7 @@ def recommend_crop(features: CropFeatures):
 
     explanation = (
         f"Based on your soil nutrients (N: {features.N}, P: {features.P}, K: {features.K} mg/kg), "
-        f"soil pH {features.ph}, temperature {features.temperature}°C, and humidity {features.humidity}%, "
+        f"soil pH {features.ph}, temperature {features.temperature}Â°C, and humidity {features.humidity}%, "
         f"{predicted_crop} is recommended with a model prediction confidence of {confidence_score}%."
     )
 
@@ -521,12 +604,13 @@ def recommend_crop(features: CropFeatures):
         recommended_crop=predicted_crop,
         confidence=confidence_score,
         prediction_confidence=confidence_score,
-        test_accuracy=99.70,
-        model_version="rf-crop-v1.2",
+        test_accuracy=crop_model_provenance["accuracy"] if crop_model_provenance["status"] == "VERIFIED" else None,
+        model_version=crop_model_provenance["version"],
         source="MODEL_PREDICTION",
-        provenance="MODEL_PREDICTION",
+        provenance=crop_model_provenance["status"],
         prediction_timestamp=ts,
         request_id=req_id,
+        artifact_hash=crop_model_provenance["sha256"],
         alternative_crops=alternatives,
         explanation=explanation,
         warnings=warnings_list
@@ -587,7 +671,7 @@ def crop_risk_intelligence(req: CropRiskRequest):
             "recommendations": ["Configure a weather API key or check network connectivity for risk assessment."]
         }
 
-    # Null-safe extraction — `or` handles both missing keys AND explicit None values
+    # Null-safe extraction â€” `or` handles both missing keys AND explicit None values
     temp = weather.get("temp") or 25
     rain = weather.get("rainfall_last_3h") or 0
     humidity = weather.get("humidity") or 50
@@ -609,10 +693,10 @@ def crop_risk_intelligence(req: CropRiskRequest):
             f_prob = entry["rain_prob"]
             if f_temp > 38: 
                 forecast_risk += 10
-                upcoming_threats.append(f"Upcoming Heatwave ({f_temp}°C)")
+                upcoming_threats.append(f"Upcoming Heatwave ({f_temp}Â°C)")
             if f_temp < 10:
                 forecast_risk += 15
-                upcoming_threats.append(f"Frost Risk Detected ({f_temp}°C)")
+                upcoming_threats.append(f"Frost Risk Detected ({f_temp}Â°C)")
             if f_prob > 70:
                 forecast_risk += 20
                 upcoming_threats.append(f"High Precipitation Certainty ({f_prob}%)")
@@ -622,17 +706,17 @@ def crop_risk_intelligence(req: CropRiskRequest):
     total_score = min(100, int(risk_now + (forecast_risk / 2) + (wind * 0.5)))
 
     # Risk classification
-    if total_score < 25: level, color = "SAFE", "🟢"
-    elif total_score < 55: level, color = "MODERATE", "🟡"
-    elif total_score < 75: level, color = "HIGH", "🟠"
-    else: level, color = "SEVERE", "🔴"
+    if total_score < 25: level, color = "SAFE", "ðŸŸ¢"
+    elif total_score < 55: level, color = "MODERATE", "ðŸŸ¡"
+    elif total_score < 75: level, color = "HIGH", "ðŸŸ "
+    else: level, color = "SEVERE", "ðŸ”´"
 
     # 3. Decision Support Analysis
     lang_name = LANG_NAMES.get(req.lang, "English")
     sys_prompt = f"You are AgriSaathi's Precision Predictive AI. Respond in {lang_name}."
     prompt = (
-        f"DATA REPORT:\n- CURRENT: {temp}°C, {rain}mm rain, {humidity}% humidity.\n"
-        f"- FORECAST: Max {max_forecast_temp}°C, Max Rain Prob {max_rain_prob}%.\n"
+        f"DATA REPORT:\n- CURRENT: {temp}Â°C, {rain}mm rain, {humidity}% humidity.\n"
+        f"- FORECAST: Max {max_forecast_temp}Â°C, Max Rain Prob {max_rain_prob}%.\n"
         f"- THREATS: {', '.join(upcoming_threats) if upcoming_threats else 'None'}.\n"
         f"- CROP: {req.crop} ({req.stage} stage).\n"
         f"- OVERALL RISK: {total_score}/100 ({level}).\n\n"
@@ -656,7 +740,7 @@ def crop_risk_intelligence(req: CropRiskRequest):
         },
         "ai_advice": res_text,
         "current_weather": weather,
-        "forecast_summary": f"Next 48h: Max {max_forecast_temp}°C, Rain potential up to {max_rain_prob}%",
+        "forecast_summary": f"Next 48h: Max {max_forecast_temp}Â°C, Rain potential up to {max_rain_prob}%",
         "timestamp": datetime.now().strftime("%I:%M %p, %d %b")
     }
 
@@ -696,13 +780,13 @@ async def telegram_webhook(req: Request):
                         # Update the farmer's Supabase profile with their Telegram Chat ID
                         res = supabase_client.table("farmers").update({"telegram_chat_id": chat_id}).eq("phone", phone).execute()
                         if res.data:
-                            send_telegram_message(chat_id, "✅ Your Telegram account is strictly bound to AgriSaathi! You will now receive automated alerts here.")
+                            send_telegram_message(chat_id, "âœ… Your Telegram account is strictly bound to AgriSaathi! You will now receive automated alerts here.")
                         else:
-                            send_telegram_message(chat_id, "❌ Phone number not found. Ensure it is exactly how you registered (e.g. +919876543210).")
+                            send_telegram_message(chat_id, "âŒ Phone number not found. Ensure it is exactly how you registered (e.g. +919876543210).")
                     else:
-                        send_telegram_message(chat_id, "⚠️ Database connection missing. Failed to link.")
+                        send_telegram_message(chat_id, "âš ï¸ Database connection missing. Failed to link.")
                 else:
-                    send_telegram_message(chat_id, "Welcome to AgriSaathi! 🌾 To receive real-time alerts, please reply with: /start YOUR_PHONE_NUMBER\nExample: /start +919876543210")
+                    send_telegram_message(chat_id, "Welcome to AgriSaathi! ðŸŒ¾ To receive real-time alerts, please reply with: /start YOUR_PHONE_NUMBER\nExample: /start +919876543210")
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -750,9 +834,9 @@ def cron_trigger_alerts(force: bool = Query(False, description="Bypass weather c
                 if force:
                     risk_level = "DEMO_SEVERE"
                     score = 99
-                impact_text = "\n".join([f"• {i}" for i in risk_data["risk"]["impacts"]])
+                impact_text = "\n".join([f"â€¢ {i}" for i in risk_data["risk"]["impacts"]])
                 msg = (
-                    f"⚠️ URGENT WEATHER ALERT ⚠️\n"
+                    f"âš ï¸ URGENT WEATHER ALERT âš ï¸\n"
                     f"Location: {lat}, {lon}\n"
                     f"Crop Risk Score: {score}/100 ({risk_level})\n"
                     f"\nExpected Impacts on {crop}:\n{impact_text}\n"
@@ -858,7 +942,7 @@ def crop_rotation_planner(data: RotationInput):
 
 
 # ============================================================
-# MODULE 9: GEOLOCATION → LANGUAGE DETECTION
+# MODULE 9: GEOLOCATION â†’ LANGUAGE DETECTION
 # ============================================================
 
 @app.post("/api/detect-language")
@@ -883,9 +967,9 @@ def send_alert(payload: NotificationPayload):
     """
     Module 10: Sends a notification to a farmer via Telegram, SMS, or Voice Call
     depending on severity level.
-    - INFO    → Telegram only
-    - WARNING → Telegram + SMS
-    - CRITICAL → Telegram + SMS + Voice Call (for disasters/floods)
+    - INFO    â†’ Telegram only
+    - WARNING â†’ Telegram + SMS
+    - CRITICAL â†’ Telegram + SMS + Voice Call (for disasters/floods)
     """
     result = dispatch_alert(payload)
     return result
@@ -893,7 +977,7 @@ def send_alert(payload: NotificationPayload):
 
 
 # ============================================================
-# GENERIC AI CHATBOT (LLM Q&A) — with smart context injection
+# GENERIC AI CHATBOT (LLM Q&A) â€” with smart context injection
 # ============================================================
 
 LANG_NAMES = {
@@ -910,44 +994,29 @@ class ChatRequest(BaseModel):
     lang: str = "en"
     context: Optional[str] = None
 
-try:
-    from .llm_service import get_llm_response
-except ImportError:
-    from llm_service import get_llm_response
-
-
 @app.post("/api/chat")
 def ai_chat(req: ChatRequest):
-    print(f"[BACKEND] Received chat request: {req.message[:50]}...")
     """
-    Intelligent chat endpoint that:
-    1. Injects real-time weather context when climate questions are asked
-    2. Always responds in user's chosen language
+    Intelligent chat endpoint routing through hybrid_provider (Ollama â†’ Groq â†’ RAG-only).
+    Injects real-time weather context when climate questions are detected.
     """
     lang_name = LANG_NAMES.get(req.lang, "English")
-
     sys_prompt = (
-        f"You are AgriSaathi, a trusted, empathetic AI agricultural companion for Indian farmers. "
+        f"You are AgriSaathi, a trusted AI agricultural companion for Indian farmers. "
         f"Always respond naturally and conversationally in {lang_name}. "
-        f"Speak warmly like a friendly, experienced farming expert. "
-        f"Provide practical, easy-to-follow step-by-step guidance with exact numbers when available. "
-        f"Use clean bullet points for clarity and avoid unnecessary robotic jargon."
+        f"Provide practical, step-by-step guidance with exact numbers when available."
     )
 
     context_parts = []
-
-    # 1. Auto-inject weather data if climate is asked
     weather_keywords = ["weather", "rain", "monsoon", "temp", "heat", "cold", "humidity", "mausam", "baarish"]
     if any(kw in req.message.lower() for kw in weather_keywords):
         try:
-            # We use a default lat/lon if not provided in request (in production, passed from frontend)
-            w = get_weather(19.076, 72.877) 
+            w = get_weather(19.076, 72.877)
             wctx = (
                 f"CURRENT WEATHER CONTEXT:\n"
                 f"- Conditions: {w['description']}\n"
-                f"- Temp: {w['temp']}°C | Hum: {w['humidity']}%\n"
-                f"- Recent Rain: {w['rainfall_last_3h']}mm\n"
-                f"- Recommendation: Maintain moisture if rain is low, avoid spraying if rain is expected."
+                f"- Temp: {w['temp']}Â°C | Hum: {w['humidity']}%\n"
+                f"- Recent Rain: {w['rainfall_last_3h']}mm"
             )
             context_parts.append(wctx)
         except Exception as e:
@@ -956,10 +1025,8 @@ def ai_chat(req: ChatRequest):
     if context_parts or req.context:
         all_ctx = "\n\n".join(filter(None, context_parts + [req.context or ""]))
         prompt = (
-            f"You have the following REAL-TIME DATA. Use it to give a specific, data-backed answer:\n"
-            f"{all_ctx}\n\n"
-            f"Farmer Question: {req.message}\n\n"
-            f"Answer clearly in {lang_name} with exact figures."
+            f"REAL-TIME DATA:\n{all_ctx}\n\n"
+            f"Farmer Question: {req.message}\n\nAnswer in {lang_name} with exact figures."
         )
     else:
         prompt = f"Farmer Question: {req.message}\n\nAnswer in {lang_name}."
@@ -980,11 +1047,15 @@ def ai_chat(req: ChatRequest):
                 "confidence": res.confidence.overall,
                 "dataSources": [e.name for e in res.evidence]
             },
-            "structured": res.dict()
+            "structured": res.model_dump()
         }
 
-    response = get_llm_response(prompt=prompt, system_prompt=sys_prompt)
-    return {"message": response}
+    # Fallback: route through hybrid_provider (Ollama â†’ Groq â†’ RAG-only)
+    if hybrid_provider:
+        gen_res = hybrid_provider.generate(prompt, system=sys_prompt)
+        return {"message": gen_res.answer, "provider": gen_res.provider}
+
+    return {"message": "Advisory system unavailable. Please try again later.", "provider": "UNAVAILABLE"}
 
 @app.post("/api/agent/chat")
 def agent_chat_api(req: AgentChatRequest):
@@ -1054,7 +1125,7 @@ try:
         evaluate_fertilizer_burn_ec,
         evaluate_multimodal_fusion
     )
-    from .database import log_telemetry, get_telemetry_history, queue_offline_event, get_pending_sync_count
+    from .db_layer import db_layer
 except ImportError:
     from risk_engine import (
         compute_4zone_farm_status,
@@ -1063,16 +1134,16 @@ except ImportError:
         evaluate_fertilizer_burn_ec,
         evaluate_multimodal_fusion
     )
-    from database import log_telemetry, get_telemetry_history, queue_offline_event, get_pending_sync_count
+    from db_layer import db_layer
 
 class SensorInput(BaseModel):
     zone_id: int = 2
     z1_moisture: Optional[float] = 45.0
     z2_moisture: Optional[float] = 16.0
-    z3_pest_count: Optional[int] = 24
-    z4_humidity: Optional[float] = 92.0
-    air_temp: Optional[float] = 35.0
-    ec_salinity: Optional[float] = 1.2
+    z3_pest_count: Optional[int] = None
+    z4_humidity: Optional[float] = None
+    air_temp: Optional[float] = None
+    ec_salinity: Optional[float] = None
     wind_speed: Optional[float] = 8.0
 
 @app.post("/api/farm-risk")
@@ -1084,16 +1155,16 @@ def get_farm_risk_overview(sensor: Optional[SensorInput] = None):
     2. Spray Drift Guard & Safety Window
     3. Osmotic Root Stress & Fertilizer Burn Index
     """
-    sensor_dict = sensor.dict() if sensor else {}
+    sensor_dict = sensor.model_dump() if sensor else {}
     return compute_4zone_farm_status(sensor_dict)
 
 # In-memory alert cooldown tracker (key: alert_type, value: timestamp)
 ALERT_COOLDOWNS: Dict[str, float] = {}
 
 try:
-    from .database import get_all_zones_recent_history, get_telemetry_history
+    from .db_layer import db_layer
 except ImportError:
-    from database import get_all_zones_recent_history, get_telemetry_history
+    from db_layer import db_layer
 
 
 @app.get("/api/telemetry/history")
@@ -1102,15 +1173,20 @@ def get_telemetry_history_api(zone_id: Optional[int] = None, limit: int = 20):
     Returns time-series telemetry records for farm analytics charts.
     """
     if zone_id is not None:
-        return {"zone_id": zone_id, "history": get_telemetry_history(zone_id=zone_id, limit=limit)}
-    return get_all_zones_recent_history(limit_per_zone=limit)
+        return {"zone_id": zone_id, "history": db_layer.get_telemetry_history(device_id="ESP32_NODE_01", limit=limit)}
+    return db_layer.get_all_zones_recent_history(limit_per_zone=limit)
 
 @app.post("/api/sensor-data")
-def ingest_sensor_telemetry(data: SensorInput):
+def ingest_sensor_telemetry(
+    data: SensorInput,
+    user: UserPrincipal = Depends(get_current_user)
+):
     """
     Ingests telemetry from IoT hardware or UI simulator into SQLite database.
     Evaluates critical risk thresholds and triggers emergency alerts with cooldown protection.
     """
+    if not settings.ENABLE_HTTP_SENSOR_FALLBACK:
+        raise HTTPException(status_code=403, detail="HTTP Sensor Fallback is disabled in production. Use MQTT.")
     soil_temp = (data.air_temp - 3.0) if data.air_temp is not None else None
     log_telemetry(
         zone_id=data.zone_id,
@@ -1136,10 +1212,10 @@ def ingest_sensor_telemetry(data: SensorInput):
                 "phosphorus": None,
                 "potassium": None
             },
-            "data_source": "HTTP_EDGE"
+            "data_source": "http_debug"
         })
 
-    farm_status = compute_4zone_farm_status(data.dict())
+    farm_status = compute_4zone_farm_status(data.model_dump())
     
     # Automated Alert Threshold Watcher (with 30-minute cooldown)
     # Strictly checks that readings are NOT None before evaluating conditions
@@ -1150,25 +1226,25 @@ def ingest_sensor_telemetry(data: SensorInput):
     if data.z2_moisture is not None and data.z2_moisture < 18.0 and (now - ALERT_COOLDOWNS.get("drought", 0)) > 1800:
         ALERT_COOLDOWNS["drought"] = now
         triggered_alerts.append(f"CRITICAL: Zone {data.zone_id} soil moisture < 18% ({data.z2_moisture}%). Drip irrigation advised immediately.")
-        queue_offline_event("ALERT_DROUGHT", f"Zone {data.zone_id} moisture critical: {data.z2_moisture}%")
+        db_layer.process_offline_sync_batch("ESP32_NODE_01", [{"type": "ALERT_DROUGHT", "payload": f"Zone {data.zone_id} moisture critical: {data.z2_moisture}%"}])
 
     # Pest Spike Alert
     if data.z3_pest_count is not None and data.z3_pest_count > 25 and (now - ALERT_COOLDOWNS.get("pest", 0)) > 1800:
         ALERT_COOLDOWNS["pest"] = now
         triggered_alerts.append(f"WARNING: Zone {data.zone_id} pest acceleration detected ({data.z3_pest_count}). Inspect sticky traps and deploy bio-agents.")
-        queue_offline_event("ALERT_PEST", f"Pest count spike: {data.z3_pest_count}")
+        db_layer.process_offline_sync_batch("ESP32_NODE_01", [{"type": "ALERT_PEST", "payload": f"Pest count spike: {data.z3_pest_count}"}])
 
     # High Fungal Infection Alert
     if data.z4_humidity is not None and data.z4_humidity > 90.0 and (now - ALERT_COOLDOWNS.get("fungal", 0)) > 1800:
         ALERT_COOLDOWNS["fungal"] = now
         triggered_alerts.append(f"WARNING: Zone {data.zone_id} humidity > 90% ({data.z4_humidity}%). Fungal spore germination risk. Prepare preventive spray.")
-        queue_offline_event("ALERT_FUNGAL", f"High humidity: {data.z4_humidity}%")
+        db_layer.process_offline_sync_batch("ESP32_NODE_01", [{"type": "ALERT_FUNGAL", "payload": f"High humidity: {data.z4_humidity}%"}])
 
     # Over-irrigation / Waterlogging Alert
     if data.z2_moisture is not None and data.z2_moisture > 80.0 and (now - ALERT_COOLDOWNS.get("flood", 0)) > 1800:
         ALERT_COOLDOWNS["flood"] = now
         triggered_alerts.append(f"WARNING: Zone {data.zone_id} waterlogging detected ({data.z2_moisture}%). Halt irrigation pumps.")
-        queue_offline_event("ALERT_WATERLOGGING", f"Moisture saturation: {data.z2_moisture}%")
+        db_layer.process_offline_sync_batch("ESP32_NODE_01", [{"type": "ALERT_WATERLOGGING", "payload": f"Moisture saturation: {data.z2_moisture}%"}])
 
     return {
         "status": "success",
@@ -1189,7 +1265,7 @@ class VisionDiagnoseInput(BaseModel):
     vision_label: Optional[str] = None
     soil_moisture: Optional[float] = 16.0
     temp_c: Optional[float] = 35.0
-    ec_salinity: Optional[float] = 1.2
+    ec_salinity: Optional[float] = None
 
 try:
     from .vision_ai_model import local_vision_ai
@@ -1250,7 +1326,7 @@ async def diagnose_crop_file_upload(
     file: UploadFile = File(...),
     soil_moisture: float = Query(16.0),
     temp_c: float = Query(35.0),
-    ec_salinity: float = Query(1.2)
+    ec_salinity: Optional[float] = Query(None)
 ):
     """
     Direct multipart/form-data upload for mobile cameras and field capture devices.
@@ -1293,7 +1369,7 @@ def get_offline_status():
     """
     Returns pending offline sync event count.
     """
-    pending = get_pending_sync_count()
+    pending = db_layer.get_pending_sync_count()
     return {
         "is_offline_capable": True,
         "pending_sync_count": pending,
@@ -1307,28 +1383,26 @@ def get_offline_status():
 # MODULE 15: CUSTOM HYBRID DATABASE ENGINE (BUILT FROM SCRATCH)
 # ============================================================
 try:
-    from .hybrid_db import hybrid_db
     from .notification_engine import custom_notifier
 except ImportError:
-    from hybrid_db import hybrid_db
     from notification_engine import custom_notifier
 
 
 @app.get("/api/hybrid-db/stats")
 def get_hybrid_db_stats():
     """Returns local SQLite storage metrics and cloud sync queue status."""
-    return hybrid_db.get_db_stats()
+    return db_layer.get_db_stats()
 
 @app.post("/api/hybrid-db/sync")
 def trigger_cloud_sync():
     """
     Triggers store-and-sync protocol: Uploads pending offline edge events to cloud.
     """
-    pending = hybrid_db.get_pending_sync_events()
+    pending = db_layer.get_pending_sync_events()
     sync_ids = [e["sync_id"] for e in pending]
     
     if sync_ids:
-        hybrid_db.mark_events_synced(sync_ids)
+        db_layer.mark_events_synced(sync_ids)
         return {
             "status": "success",
             "message": f"Successfully synced {len(sync_ids)} edge telemetry events to cloud database.",
@@ -1607,7 +1681,7 @@ def calculate_crop_risk(req: CropRiskRequest):
     # Evaluate risk score based on crop and regional climate indicators
     score = 38
     level = "MODERATE"
-    color = "🟡"
+    color = "ðŸŸ¡"
     threats = [
         "Elevated humidity spore germination window",
         "Heat index variance across vegetative canopy"
@@ -1688,8 +1762,15 @@ def get_device_lifecycle_api(device_id: str = "ESP32_NODE_01"):
     return {"status": "error", "message": f"Device {device_id} not found", "device": None}
 
 @app.post("/api/mqtt/ingest-telemetry")
-def ingest_mqtt_telemetry_http(payload: Dict[str, Any]):
+def ingest_mqtt_telemetry_http(
+    payload: Dict[str, Any],
+    user: UserPrincipal = Depends(get_current_user)
+):
     """Direct HTTP bridge for edge hardware/gateway transmitting exact ESP32 JSON payload."""
+    if not settings.ENABLE_HTTP_SENSOR_FALLBACK:
+        raise HTTPException(status_code=403, detail="HTTP Sensor Fallback is disabled in production. Use MQTT.")
+        
+    payload["data_source"] = "http_debug"
     if mqtt_manager:
         res = mqtt_manager.handle_telemetry_message(payload)
         if db_layer and res.get("status") == "success" and parse_and_validate_telemetry_payload:
@@ -1808,7 +1889,21 @@ def process_offline_sync(payload: OfflineSyncRequest):
     """
     Batch-processes offline action requests queued by the Android application.
     Enforces idempotency using client_action_id to prevent duplicate database writes.
+    Commands are strictly gated by a 60s TTL from creation to prevent stale actuation.
     """
+    # 1. Pre-flight Validation: Commands MUST have a client_action_id for idempotency
+    for action in payload.queuedActions:
+        event_type = action.get("type", action.get("event_type", ""))
+        is_command = "command" in event_type.lower() or action.get("command")
+        
+        client_action_id = action.get("client_action_id") or action.get("action_id")
+        if is_command and not client_action_id:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=422,
+                detail="All offline command records MUST contain a unique 'client_action_id' for idempotency."
+            )
+
     if db_layer:
         res = db_layer.process_offline_sync_batch(payload.deviceId, payload.queuedActions)
         return res
@@ -1991,61 +2086,53 @@ class AIChatResponse(BaseModel):
 @app.get("/api/ai/health", response_model=AIHealthResponse)
 def get_ai_health():
     """
-    Checks Ollama connectivity and configured model availability.
-    Returns HEALTHY only if Ollama is reachable and configured model is present.
+    Checks LLM provider availability (Ollama local or Groq cloud).
+    All inference routes through llm_provider.hybrid_provider.
     """
-    default_model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
-    if not ollama_service:
+    if not hybrid_provider:
         return AIHealthResponse(
             status="MODEL_UNAVAILABLE",
-            provider="ollama",
-            model=default_model,
+            provider="UNAVAILABLE",
+            model="none",
             ollama_reachable=False,
             model_available=False
         )
-    h = ollama_service.check_health()
+    status = hybrid_provider.get_status()
     return AIHealthResponse(
-        status=h.status,
-        provider="ollama",
-        model=h.model,
-        ollama_reachable=h.ollama_reachable,
-        model_available=h.model_available
+        status="HEALTHY" if status.status == "AVAILABLE" else status.status,
+        provider=status.provider,
+        model=status.model_name,
+        ollama_reachable=(status.provider == "OLLAMA" and status.status == "AVAILABLE"),
+        model_available=(status.status == "AVAILABLE")
     )
 
 @app.get("/api/ai/status")
 def get_ai_status():
-    """Returns live availability status of Ollama service and RAG knowledge base."""
-    ollama_info = {
-        "status": "UNAVAILABLE",
-        "active_model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct"),
-        "available_models": [],
-        "latency_ms": None,
-        "error": "Ollama service module offline"
-    }
-    if ollama_service:
-        h = ollama_service.check_health()
-        ollama_info = {
-            "status": "AVAILABLE" if h.status == "HEALTHY" else "UNAVAILABLE",
-            "base_url": ollama_service.base_url,
-            "active_model": h.model,
-            "available_models": h.available_models,
-            "latency_ms": h.latency_ms,
-            "error": h.error_message
+    """Returns live availability status of LLM provider (Ollama/Groq) and RAG knowledge base."""
+    llm_info = {"status": "UNAVAILABLE", "provider": "NONE", "model": "none", "latency_ms": None}
+    if hybrid_provider:
+        s = hybrid_provider.get_status()
+        llm_info = {
+            "status": s.status,
+            "provider": s.provider,
+            "model": s.model_name,
+            "latency_ms": s.latency_ms
         }
 
     rag_info = {
-        "status": "AVAILABLE" if rag_service else "UNAVAILABLE",
-        "total_documents": len(rag_service._raw_documents) if rag_service else 0,
-        "total_chunks": len(rag_service.chunks_index) if rag_service else 0,
-        "chunk_size": rag_service.chunk_size if rag_service else 350,
-        "chunk_overlap": rag_service.chunk_overlap if rag_service else 70,
+        "status": "AVAILABLE" if rag_engine else "UNAVAILABLE",
+        "total_documents": len(rag_engine._raw_documents) if rag_engine else 0,
+        "total_chunks": len(rag_engine.chunks_index) if rag_engine else 0,
+        "chunk_size": rag_engine.chunk_size if rag_engine else 350,
+        "chunk_overlap": rag_engine.chunk_overlap if rag_engine else 70,
+        "corpus_hash": rag_engine.corpus_hash if rag_engine else None,
         "supported_languages": ["en", "hi", "te"],
-        "similarity_threshold": rag_service.similarity_threshold if rag_service else 1.5
+        "similarity_threshold": rag_engine.similarity_threshold if rag_engine else 8.0
     }
 
     return {
-        "status": "healthy" if ollama_info["status"] == "AVAILABLE" else "degraded",
-        "ollama": ollama_info,
+        "status": "healthy" if llm_info["status"] == "AVAILABLE" else "degraded",
+        "llm_provider": llm_info,
         "rag": rag_info,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -2054,9 +2141,11 @@ def get_ai_status():
 def list_ai_models():
     """Lists registered AI models with verified status, capabilities, and parameters."""
     is_avail = False
-    if ollama_service:
-        h = ollama_service.check_health()
-        is_avail = (h.status == "HEALTHY")
+    active_provider = "UNAVAILABLE"
+    if hybrid_provider:
+        s = hybrid_provider.get_status()
+        is_avail = (s.status == "AVAILABLE")
+        active_provider = s.provider
 
     return {
         "models": [
@@ -2106,10 +2195,10 @@ def api_rag_query(req: AIChatRequest):
     if len(query) > 2000:
         raise HTTPException(status_code=400, detail="Question exceeds maximum allowed length (2000 characters).")
 
-    if not rag_service:
+    if not rag_engine:
         raise HTTPException(status_code=503, detail="RAG service module offline")
 
-    rag_res = rag_service.query_rag(
+    rag_res = rag_engine.query_rag(
         question=query,
         language=req.language or "en",
         top_k=req.top_k or 3,
@@ -2120,25 +2209,25 @@ def api_rag_query(req: AIChatRequest):
 @app.post("/api/ai/rag/reindex")
 def api_rag_reindex():
     """Forces re-indexing of all verified extension documents in the RAG knowledge base."""
-    if not rag_service:
+    if not rag_engine:
         raise HTTPException(status_code=503, detail="RAG service module offline")
-    rag_service.reindex()
+    rag_engine.reindex()
     return {
         "status": "reindexed",
-        "total_documents": len(rag_service._raw_documents),
-        "total_chunks": len(rag_service.chunks_index),
-        "chunk_size": rag_service.chunk_size,
-        "chunk_overlap": rag_service.chunk_overlap,
+        "total_documents": len(rag_engine._raw_documents),
+        "total_chunks": len(rag_engine.chunks_index),
+        "chunk_size": rag_engine.chunk_size,
+        "chunk_overlap": rag_engine.chunk_overlap,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 @app.get("/api/ai/rag/sources")
 def api_rag_sources():
     """Returns metadata for all indexed extension documents."""
-    if not rag_service:
+    if not rag_engine:
         return {"documents": []}
     sources = []
-    for doc in rag_service._raw_documents:
+    for doc in rag_engine._raw_documents:
         meta: DocumentSourceMetadata = doc["meta"]
         sources.append({
             "doc_id": meta.doc_id,
@@ -2166,7 +2255,7 @@ def api_ai_evaluation():
         "dataset_leakage": leakage_results,
         "evaluation_metrics": {
             "retrieval_method": "Weighted Multi-Token & Paragraph Boundary Matching",
-            "similarity_threshold": rag_service.similarity_threshold if rag_service else 1.5,
+            "similarity_threshold": rag_engine.similarity_threshold if rag_engine else 1.5,
             "benchmark_dataset": "data/rag/test.jsonl",
             "supported_languages": ["en", "hi", "te"],
             "leakage_status": leakage_results.get("status", "PASSED"),
@@ -2182,9 +2271,9 @@ def api_ai_chat(
     current_user: Optional[UserPrincipal] = Depends(get_optional_user)
 ):
     """
-    Clean FastAPI API layer for Ollama LLM inference.
-    Executes actual generation against the configured Ollama model without fake/mock fallbacks.
-    The response is truthfully generated by the active Ollama model.
+    AI chat endpoint routing through the unified llm_provider.hybrid_provider.
+    Priority: Ollama local â†’ Groq cloud â†’ RAG-only grounded excerpts.
+    No fake or mock LLM fallbacks exist in this implementation.
     """
     import uuid
     req_id = f"ai-chat-{uuid.uuid4().hex[:8]}"
@@ -2221,19 +2310,15 @@ def api_ai_chat(
             }
         )
 
-    if not ollama_service:
-        logger.error(f"[{req_id}] Ollama service uninitialized.")
+    if not hybrid_provider:
+        logger.error(f"[{req_id}] LLM provider uninitialized.")
         raise HTTPException(
             status_code=503,
             detail={
-                "error_code": "OLLAMA_UNREACHABLE",
-                "message": "Ollama service layer is uninitialized or unavailable.",
-                "provider": "ollama",
-                "model": os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+                "error_code": "LLM_PROVIDER_UNAVAILABLE",
+                "message": "No LLM provider (Ollama/Groq) is reachable. Configure OLLAMA_BASE_URL or GROQ_API_KEY.",
             }
         )
-
-    target_model = req.model or ollama_service.default_model
 
     # 3. Assemble context if supplied or requested
     context_parts = []
@@ -2267,101 +2352,37 @@ def api_ai_chat(
 
     assembled_context = "\n".join(context_parts) if context_parts else None
 
-    # 4. Invoke Ollama service
+    # 4. Route to hybrid_provider (Ollama â†’ Groq â†’ RAG-only)
     t0 = time.perf_counter()
     try:
-        gen_res = ollama_service.generate_response(
-            user_message=query,
-            context=assembled_context,
-            model=req.model,
-            raise_on_error=True
+        system_prompt = (
+            "You are AgriSaathi, an expert agricultural advisor for Indian farmers. "
+            "Base your answer on verified extension knowledge. Do not hallucinate."
         )
+        gen_res = hybrid_provider.generate(query, system=system_prompt, rag_excerpt=assembled_context)
         latency = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(
-            f"[{req_id}] AI chat generation succeeded with model '{target_model}' in {latency}ms"
+            f"[{req_id}] AI chat succeeded via {gen_res.provider}:{gen_res.model_name} in {latency}ms"
         )
         return AIChatResponse(
-            response=gen_res.text,
-            answer=gen_res.text,
+            response=gen_res.answer,
+            answer=gen_res.answer,
             model=gen_res.model_name,
             model_name=gen_res.model_name,
-            provider="ollama",
-            status="GENERATED",
-            provenance="SOURCE_BACKED_KNOWLEDGE",
+            provider=gen_res.provider,
+            status=gen_res.status,
+            provenance=gen_res.provenance,
             citations=[],
             retrieved_chunks=0,
             request_id=req_id,
             generated_at=now_iso,
-            latency_ms=gen_res.generation_time_ms,
+            latency_ms=gen_res.latency_ms,
             prompt_tokens=gen_res.prompt_tokens,
             completion_tokens=gen_res.completion_tokens,
             sensor_context=sensor_ctx,
             weather_context=weather_ctx,
-            warnings=[]
+            warnings=gen_res.warnings or []
         )
-    except OllamaServiceException as e:
-        latency = round((time.perf_counter() - t0) * 1000, 2)
-        err_code = getattr(e, "error_code", "OLLAMA_UNAVAILABLE")
-        err_msg = getattr(e, "message", str(e))
-        err_status = getattr(e, "status_code", 503)
-        logger.warning(f"[{req_id}] Ollama unavailable or model missing ({err_code}): {err_msg}. Falling back to grounded RAG knowledge synthesis.")
-        try:
-            from agent_orchestrator import agent_orchestrator as orch, AgentChatRequest
-            if orch:
-                agent_req = AgentChatRequest(
-                    message=query,
-                    crop="Rice",
-                    stage="Vegetative",
-                    field_id="zone-1-north-field",
-                    user_id="anonymous"
-                )
-                res = orch.process_query(agent_req)
-                citations = []
-                if getattr(res, "evidence", None):
-                    for ev in res.evidence:
-                        citations.append({
-                            "source": getattr(ev, "name", str(ev)),
-                            "relevance": getattr(ev, "confidence", 0.95)
-                        })
-                if getattr(res, "sources", None):
-                    for s in res.sources:
-                        if isinstance(s, dict):
-                            citations.append({
-                                "source": s.get("title") or s.get("source") or "ICAR Agricultural Guidelines",
-                                "relevance": 0.95
-                            })
-                return AIChatResponse(
-                    response=res.answer,
-                    answer=res.answer,
-                    model="rag-hybrid-knowledge",
-                    model_name="rag-hybrid-knowledge",
-                    provider="RAG_HYBRID",
-                    status="GENERATED",
-                    provenance="SOURCE_BACKED_KNOWLEDGE",
-                    citations=citations,
-                    retrieved_chunks=len(citations),
-                    request_id=req_id,
-                    generated_at=now_iso,
-                    latency_ms=latency,
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    sensor_context=sensor_ctx,
-                    weather_context=weather_ctx,
-                    warnings=[f"Ollama model '{target_model}' not found in cloud; served via grounded RAG knowledge engine."]
-                )
-            raise RuntimeError("Agent orchestrator not available")
-        except Exception as fallback_err:
-            logger.error(f"[{req_id}] Fallback generation failed: {fallback_err}")
-            raise HTTPException(
-                status_code=err_status,
-                detail={
-                    "error_code": err_code,
-                    "message": err_msg,
-                    "provider": "ollama",
-                    "model": target_model,
-                    "request_id": req_id
-                }
-            )
     except Exception as e:
         latency = round((time.perf_counter() - t0) * 1000, 2)
         logger.error(f"[{req_id}] Unexpected error in AI chat: {e} (latency: {latency}ms)")
@@ -2370,8 +2391,6 @@ def api_ai_chat(
             detail={
                 "error_code": "MODEL_GENERATION_FAILED",
                 "message": f"Unexpected error during generation: {str(e)}",
-                "provider": "ollama",
-                "model": target_model,
                 "request_id": req_id
             }
         )

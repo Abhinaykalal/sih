@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -13,137 +13,56 @@ import {
 import { theme } from '../styles/theme';
 import { ApiClient } from '../services/ApiClient';
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
-import { getFarmContextSync, loadFarmContext, FarmProfile } from '../services/FarmContext';
+
+
+import { usePumpController } from '../hooks/usePumpController';
 
 export function PumpControlScreen() {
-  const [farmProfile, setFarmProfile] = useState<FarmProfile>(getFarmContextSync());
-  const [pumpStateData, setPumpStateData] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const {
+    farmProfile,
+    pumpStateData,
+    loading,
+    currentLifecycleStage,
+    commandHistory,
+    liveRainProb,
+    dispatchPump,
+    loadPumpState,
+  } = usePumpController();
+
   const [overrideModalVisible, setOverrideModalVisible] = useState(false);
   const [overrideReason, setOverrideReason] = useState('Emergency manual irrigation override');
   const [manualOverrideActive, setManualOverrideActive] = useState(false);
   const [overrideDurationMin, setOverrideDurationMin] = useState('10');
-  const [currentLifecycleStage, setCurrentLifecycleStage] = useState<'IDLE' | 'REQUESTED' | 'PUBLISHED' | 'ACKNOWLEDGED' | 'EXECUTED' | 'BLOCKED'>('IDLE');
-  const [commandHistory, setCommandHistory] = useState<any[]>([]);
-  const [liveRainProb, setLiveRainProb] = useState<number | null>(null);
 
-  useEffect(() => {
-    initAndLoad();
-  }, []);
-
-  const initAndLoad = async () => {
-    try {
-      const profile = await loadFarmContext();
-      setFarmProfile(profile);
-    } catch {}
-    loadPumpState();
-  };
-
-  const loadPumpState = async () => {
-    const deviceId = farmProfile.primary_device_id || 'ESP32_NODE_01';
-    try {
-      const res = await ApiClient.pump.getPumpState(deviceId);
-      if (res && res.state) {
-        setPumpStateData(res.state);
-        if (res.state.command_state === 'EXECUTED' && res.state.reported_state === 'ON') {
-          setCurrentLifecycleStage('EXECUTED');
-        }
-      }
-      const histRes = await ApiClient.pump.getCommands(deviceId);
-      if (histRes && histRes.history) {
-        setCommandHistory(histRes.history);
-      }
-    } catch (e: any) {
-      console.warn('Could not load live pump state:', e.message);
-    }
-  };
-
-  const handleStartPump = async () => {
-    setLoading(true);
-    setCurrentLifecycleStage('REQUESTED');
-
-    try {
-      // Query live weather conditions for genuine rain probability
-      let activeRain = false;
-      let rainProb = 0;
-      let rainMm = 0;
-      try {
-        if (farmProfile.lat && farmProfile.lon) {
-          const weather = await ApiClient.weather.getWeatherAdvice(
-            farmProfile.lat, farmProfile.lon, farmProfile.active_crop || undefined
-          );
-          if (weather) {
-            rainProb = weather.rain_probability_pct ?? 0;
-            rainMm = weather.rainfall_mm ?? 0;
-            activeRain = weather.weather_status === 'RAIN' || rainMm > 1.0;
-            setLiveRainProb(rainProb);
-          }
-        }
-      } catch {
-        // Fallback to telemetry if weather API unreachable
-      }
-
-      const res = await ApiClient.pump.dispatchCommand({
-        deviceId: farmProfile.primary_device_id || 'ESP32_NODE_01',
-        commandType: 'PUMP_ON',
-        durationSec: parseInt(overrideDurationMin, 10) * 60 || 300,
-        reason: manualOverrideActive ? `OVERRIDE: ${overrideReason}` : 'Farmer initiated soil moisture replenishment',
-        activeRain,
-        rainProbabilityPct: rainProb,
-        rainForecastMm: rainMm,
-        manualOverride: manualOverrideActive,
-      });
-
-      const cmd = res?.command;
-      if (cmd?.status === 'blocked') {
-        setCurrentLifecycleStage('BLOCKED');
+  const handleStartPump = () => {
+    dispatchPump(
+      parseInt(overrideDurationMin, 10) * 60 || 300,
+      manualOverrideActive,
+      overrideReason,
+      (reason, rainProb) => {
         Alert.alert(
-          '🛡️ Activation Blocked by Rain Lockout',
-          cmd.reason || `${rainProb}% Rain Forecast. Automatic safety lock engaged to prevent waterlogging.`,
+          "🛡️ Activation Blocked by Rain Lockout",
+          reason,
           [
-            { text: 'Cancel', style: 'cancel' },
+            { text: "Cancel", style: "cancel" },
             {
-              text: 'Emergency Override',
-              style: 'destructive',
+              text: "Emergency Override",
+              style: "destructive",
               onPress: () => setOverrideModalVisible(true),
             },
           ]
         );
-      } else {
-        setCurrentLifecycleStage('PUBLISHED');
-        setTimeout(() => setCurrentLifecycleStage('ACKNOWLEDGED'), 500);
-        setTimeout(() => {
-          setCurrentLifecycleStage('EXECUTED');
-          loadPumpState();
-        }, 1000);
       }
-    } catch (e: any) {
-      Alert.alert('Dispatch Error', e.message || 'Unable to communicate with pump controller.');
-      setCurrentLifecycleStage('IDLE');
-    } finally {
-      setLoading(false);
-    }
+    );
   };
 
-  const handleStopPump = async () => {
-    setLoading(true);
-    setCurrentLifecycleStage('REQUESTED');
-    try {
-      await ApiClient.pump.dispatchCommand({
-        deviceId: farmProfile.primary_device_id || 'ESP32_NODE_01',
-        commandType: 'PUMP_OFF',
-        durationSec: 0,
-        reason: 'Farmer stopped pump manually from mobile app',
-      });
-      setCurrentLifecycleStage('EXECUTED');
-      setManualOverrideActive(false);
-      loadPumpState();
-    } catch (e: any) {
-      Alert.alert('Stop Error', e.message);
-      setCurrentLifecycleStage('IDLE');
-    } finally {
-      setLoading(false);
-    }
+  const handleStopPump = () => {
+    dispatchPump(
+      0,
+      false,
+      "Farmer stopped pump manually from mobile app",
+      (reason) => Alert.alert("Blocked", reason)
+    );
   };
 
   const confirmEmergencyOverride = () => {
@@ -154,18 +73,18 @@ export function PumpControlScreen() {
     setManualOverrideActive(true);
     setOverrideModalVisible(false);
     Alert.alert(
-      '⚠️ Emergency Override Armed',
+      'âš ï¸ Emergency Override Armed',
       `Manual override active for ${overrideDurationMin} minutes. This action will be recorded in the immutable audit log.`
     );
   };
 
-  const isPumpRunning = pumpStateData?.reported_state === 'ON' || currentLifecycleStage === 'EXECUTED';
+  const isPumpRunning = pumpStateData?.reported_state === 'ON' || currentLifecycleStage === 'ACTUATION_ACCEPTED';
 
   const stages = [
     { key: 'REQUESTED', label: '1. Requested', desc: 'Validated by safety rules' },
     { key: 'PUBLISHED', label: '2. Published', desc: 'MQTT downlink dispatched' },
     { key: 'ACKNOWLEDGED', label: '3. Acknowledged', desc: 'Hardware ACK received' },
-    { key: 'EXECUTED', label: '4. Executed', desc: 'Physical relay confirmed' },
+    { key: 'ACTUATION_ACCEPTED', label: '4. Executed', desc: 'Physical relay confirmed' },
   ];
 
   const getStageIndex = (stage: string) => {
@@ -173,7 +92,7 @@ export function PumpControlScreen() {
       case 'REQUESTED': return 0;
       case 'PUBLISHED': return 1;
       case 'ACKNOWLEDGED': return 2;
-      case 'EXECUTED': return 3;
+      case 'ACTUATION_ACCEPTED': return 3;
       default: return -1;
     }
   };
@@ -198,7 +117,7 @@ export function PumpControlScreen() {
             <View style={[styles.statusIconDot, { backgroundColor: isPumpRunning ? '#15803D' : '#94A3B8' }]} />
           </View>
           <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.statusDeviceLabel}>ESP32 NODE 01 • ZONE 1 PUMP</Text>
+            <Text style={styles.statusDeviceLabel}>ESP32 NODE 01 â€¢ ZONE 1 PUMP</Text>
             <Text style={styles.statusMainText}>
               {isPumpRunning ? 'PUMP IS RUNNING' : 'PUMP IS OFF (STANDBY)'}
             </Text>
@@ -250,7 +169,7 @@ export function PumpControlScreen() {
           <View style={styles.overrideActiveBanner}>
             <Text style={styles.overrideActiveTitle}>EMERGENCY OVERRIDE ENGAGED</Text>
             <Text style={styles.overrideActiveSub}>
-              Reason: {overrideReason} • Duration: {overrideDurationMin}m
+              Reason: {overrideReason} â€¢ Duration: {overrideDurationMin}m
             </Text>
           </View>
         )}
@@ -366,7 +285,7 @@ export function PumpControlScreen() {
               <View key={stage.key} style={styles.stageItem}>
                 <View style={[styles.stageIconBadge, isCompleted && styles.stageIconCompleted, isCurrent && styles.stageIconCurrent]}>
                   <Text style={[styles.stageNumber, isCompleted && styles.stageNumberCompleted]}>
-                    {isCompleted ? '✓' : String(idx + 1)}
+                    {isCompleted ? 'âœ“' : String(idx + 1)}
                   </Text>
                 </View>
                 <View style={{ flex: 1, marginLeft: 12 }}>
@@ -769,3 +688,6 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
   },
 });
+
+
+

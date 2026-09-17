@@ -1,14 +1,19 @@
 """
-AgriSaathi Agent Orchestrator
-================================
-Multi-model AI orchestrator with:
-- Intent detection (expandable to ML-based classifier)
-- Tool selection (sensor / vision / irrigation / NPK / RAG / weather)
-- Provenance-aware response formatting & telemetry separation
-- Null-safe weather integration
-- Conversation memory (per-user sliding window)
-- Multilingual input/output (auto-detect + translate)
-- Structured JSON output with granular data provenance
+AgriSaathi Telemetry Decision Router
+=====================================
+IMPORTANT: This module is NOT an LLM and does NOT generate text.
+It is a deterministic rules-based aggregator that:
+  - Reads live/simulated ESP32 telemetry via MQTT
+  - Retrieves RAG knowledge chunks from rag_engine.py
+  - Evaluates irrigation decisions via the irrigation_provider
+  - Formats the output as structured, provenance-tagged JSON
+
+All natural language generation is handled exclusively by
+llm_provider.py (llm_provider.hybrid_provider), which routes
+Ollama local â†’ Groq cloud â†’ RAG-only.
+
+This module does NOT call any LLM, it only assembles structured
+inputs and routes them to domain tools.
 """
 
 import os
@@ -26,7 +31,7 @@ if ROOT_DIR not in sys.path:
 
 try:
     from model_providers import (
-        vision_provider,
+        
         irrigation_provider,
         nutrient_provider,
         EvidenceItem,
@@ -51,7 +56,7 @@ try:
 except ImportError:
     try:
         from mlbackend.model_providers import (
-            vision_provider, irrigation_provider, nutrient_provider,
+             irrigation_provider, nutrient_provider,
             EvidenceItem, ModelConfidence
         )
         from mlbackend.rag_engine import rag_engine
@@ -71,7 +76,6 @@ except ImportError:
             determine_overall_status
         )
     except ImportError:
-        vision_provider = None
         irrigation_provider = None
         nutrient_provider = None
         rag_engine = None
@@ -95,6 +99,59 @@ except ImportError:
         class ModelConfidence(BaseModel):
             overall: float
             level: str = "high"
+
+        # Minimal stubs so agent_orchestrator doesn't crash at runtime
+        from enum import Enum
+        class DataProvenance(str, Enum):
+            LIVE_SENSOR = "LIVE_SENSOR"
+            LIVE_WEATHER = "LIVE_WEATHER"
+            SIMULATED = "SIMULATED"
+            SOURCE_BACKED_KNOWLEDGE = "SOURCE_BACKED_KNOWLEDGE"
+            RULE_BASED = "RULE_BASED"
+            UNAVAILABLE = "UNAVAILABLE"
+
+        class FieldTelemetryItem(BaseModel):
+            value: Any = None
+            unit: Optional[str] = None
+            provenance: str = "UNAVAILABLE"
+            device_id: Optional[str] = None
+            timestamp: Optional[str] = None
+            freshness: str = "OFFLINE"
+
+        class WeatherStatusItem(BaseModel):
+            status: str = "UNAVAILABLE"
+            temperature_c: Optional[float] = None
+            humidity_pct: Optional[float] = None
+            rainfall_mm: Optional[float] = None
+            description: Optional[str] = None
+            provenance: str = "UNAVAILABLE"
+
+        class KnowledgeStatementItem(BaseModel):
+            statement: str
+            provenance: str = "UNAVAILABLE"
+            source_title: Optional[str] = None
+            source_organization: Optional[str] = None
+            source_url: Optional[str] = None
+            publication_date: Optional[str] = None
+            crop: Optional[str] = None
+            growth_stage: Optional[str] = None
+            region: Optional[str] = None
+            citation_id: Optional[str] = None
+            source_status: str = "UNVERIFIED"
+            limitations: list = []
+
+        class DecisionItem(BaseModel):
+            result: str = "UNAVAILABLE"
+            provenance: str = "UNAVAILABLE"
+            explanation: str = ""
+            inputs_used: list = []
+            inputs_missing: list = []
+            urgency: str = "LOW"
+            target_water_mm: Optional[float] = None
+
+        def format_weather_display(weather_data, is_demo_mode=False): return WeatherStatusItem()
+        def render_advisory_text(*args, **kwargs): return ""
+        def determine_overall_status(*args, **kwargs): return "UNAVAILABLE"
 
 
 class AgentChatRequest(BaseModel):
@@ -222,7 +279,7 @@ class AgentOrchestrator:
             ),
             "air_temperature_c": FieldTelemetryItem(
                 value=air_temp,
-                unit="°C",
+                unit="Â°C",
                 provenance=telemetry_source if air_temp is not None else DataProvenance.UNAVAILABLE.value,
                 device_id=device_id,
                 timestamp=telemetry_ts,
@@ -244,7 +301,7 @@ class AgentOrchestrator:
                     timestamp=telemetry_ts
                 ))
             if air_temp is not None:
-                evidence_list.append(EvidenceItem(type="sensor", name="air_temperature", value=air_temp, unit="°C"))
+                evidence_list.append(EvidenceItem(type="sensor", name="air_temperature", value=air_temp, unit="Â°C"))
             if humidity is not None:
                 evidence_list.append(EvidenceItem(type="sensor", name="humidity", value=humidity, unit="%"))
             if ph is not None:
@@ -328,7 +385,9 @@ class AgentOrchestrator:
                 inputs_used=irrig_res.inputs_used,
                 inputs_missing=irrig_res.inputs_missing,
                 urgency=irrig_res.urgency,
-                target_water_mm=irrig_res.target_water_mm
+                target_water_mm=irrig_res.target_water_mm,
+                threshold_source=getattr(irrig_res, "threshold_source", None),
+                validation_status=getattr(irrig_res, "validation_status", "UNVALIDATED_AGAINST_FIELD_OUTCOMES")
             )
             actions = ([f"Apply {irrig_res.target_water_mm} mm irrigation to root zone.",
                         "Monitor soil moisture 4 hours post-irrigation."]
@@ -338,7 +397,7 @@ class AgentOrchestrator:
             conf = irrig_res.confidence
         else:
             decision_item = DecisionItem(
-                result="Decision unavailable — required inputs are missing",
+                result="Decision unavailable â€” required inputs are missing",
                 provenance=DataProvenance.UNAVAILABLE.value,
                 explanation="Irrigation provider engine offline.",
                 inputs_used=[],
@@ -416,10 +475,10 @@ class AgentOrchestrator:
             advisory_title=f"AgriSaathi Advisory for {req.crop or 'Rice'}",
             crop=req.crop or "Rice",
             growth_stage=req.stage or "Vegetative",
-            field_status={k: (v.model_dump() if hasattr(v, "model_dump") else v.dict()) for k, v in field_status.items()},
-            weather=(weather_item.model_dump() if hasattr(weather_item, "model_dump") else weather_item.dict()),
-            knowledge=[(k.model_dump() if hasattr(k, "model_dump") else k.dict()) for k in knowledge_items],
-            decision=(decision_item.model_dump() if hasattr(decision_item, "model_dump") else decision_item.dict()),
+            field_status={k: v.model_dump() for k, v in field_status.items()},
+            weather=weather_item.model_dump(),
+            knowledge=[k.model_dump() for k in knowledge_items],
+            decision=decision_item.model_dump(),
             data_quality=data_quality_map,
             overall_status=overall_status_val
         )

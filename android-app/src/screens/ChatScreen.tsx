@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,9 +9,9 @@ import {
   ActivityIndicator,
   SafeAreaView
 } from 'react-native';
-import { ApiClient } from '../services/ApiClient';
-import { OfflineStore } from '../services/OfflineStore';
-import { getFarmContextSync } from '../services/FarmContext';
+
+
+
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
 export interface CitationItem {
@@ -39,131 +39,28 @@ export interface ChatMessage {
   isError?: boolean;
 }
 
+import { useAdvisoryChat } from '../hooks/useAdvisoryChat';
+
 export function ChatScreen() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const {
+    messages,
+    loading,
+    selectedLanguage,
+    setSelectedLanguage,
+    isOffline,
+    modelStatus,
+    handleSend: hookHandleSend,
+    clearHistory
+  } = useAdvisoryChat();
+
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [selectedLanguage, setSelectedLanguage] = useState<'en' | 'hi' | 'te'>('en');
-  const [isOffline, setIsOffline] = useState(false);
-  const [modelStatus, setModelStatus] = useState<string>('CHECKING');
   const scrollViewRef = useRef<ScrollView>(null);
-
-  useEffect(() => {
-    loadCachedMessages();
-    checkAIStatus();
-  }, []);
-
-  const checkAIStatus = async () => {
-    try {
-      const res = await ApiClient.ai.getStatus();
-      if (res?.ollama?.status) {
-        setModelStatus(res.ollama.status);
-      }
-    } catch {
-      setModelStatus('UNAVAILABLE');
-    }
-  };
-
-  const loadCachedMessages = async () => {
-    const cached = await OfflineStore.getCachedChatMessages();
-    if (cached && cached.length > 0) {
-      setMessages(cached);
-    } else {
-      setMessages([
-        {
-          id: 'welcome',
-          sender: 'bot',
-          text: 'Namaste! I am AgriSaathi AI powered by verified ICAR/IMD agricultural research and local Ollama inference. Ask me about crop health, irrigation timing, NPK balancing, or weather advisories.',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          provenance: 'SOURCE_BACKED_KNOWLEDGE',
-          modelName: 'qwen2.5:7b-instruct',
-          modelStatus: 'AVAILABLE',
-          retrievedChunks: 8,
-          citations: [
-            {
-              chunk_id: 'icar-rice-irr-001-chk-01',
-              title: 'ICAR Package of Practices for Rice Water & Irrigation Management',
-              source: 'Indian Council of Agricultural Research (ICAR-IIRR)',
-              section: 'Water Management & AWD Protocol'
-            }
-          ]
-        }
-      ]);
-    }
-  };
 
   const handleSend = async (queryText?: string) => {
     const textToSend = queryText || input.trim();
-    if (!textToSend || loading) return;
-
-    const userMsg: ChatMessage = {
-      id: `u_${Date.now()}`,
-      sender: 'user',
-      text: textToSend,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    const updated = [...messages, userMsg];
-    setMessages(updated);
+    if (!textToSend) return;
+    await hookHandleSend(textToSend);
     if (!queryText) setInput('');
-    setLoading(true);
-
-    try {
-      const profile = getFarmContextSync();
-      const response = await ApiClient.ai.chat({
-        question: textToSend,
-        language: selectedLanguage,
-        ...(profile.farm_id ? { farm_id: profile.farm_id } : {}),
-        ...(profile.zones[0]?.id ? { zone_id: profile.zones[0].id } : {}),
-        include_sensor_context: true,
-        include_weather_context: true,
-        top_k: 3
-      });
-
-      const botMsg: ChatMessage = {
-        id: `b_${Date.now()}`,
-        sender: 'bot',
-        text: response.answer || 'No answer could be synthesized from knowledge base.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        provenance: response.provenance || 'SOURCE_BACKED_KNOWLEDGE',
-        modelName: response.model_name || 'qwen2.5:7b-instruct',
-        modelStatus: response.model_status || 'AVAILABLE',
-        retrievedChunks: response.retrieved_chunks || 0,
-        citations: response.citations || [],
-        sensorContext: response.sensor_context,
-        weatherContext: response.weather_context,
-        warnings: response.warnings || []
-      };
-
-      const finalMsgs = [...updated, botMsg];
-      setMessages(finalMsgs);
-      await OfflineStore.cacheChatMessages(finalMsgs);
-      setIsOffline(false);
-      if (response.model_status) setModelStatus(response.model_status);
-    } catch (err: any) {
-      console.warn('Network or AI request failed:', err.message);
-      setIsOffline(true);
-      await OfflineStore.enqueueAction('CHAT', { query: textToSend, language: selectedLanguage });
-
-      const offlineMsg: ChatMessage = {
-        id: `b_err_${Date.now()}`,
-        sender: 'bot',
-        text: '[OFFLINE / SERVICE UNAVAILABLE] Could not reach backend AI service. Your question has been queued for background sync.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        provenance: 'UNAVAILABLE',
-        modelName: 'Offline Fallback',
-        modelStatus: 'UNAVAILABLE',
-        isError: true,
-        warnings: ['Internet or backend AI endpoint currently unreachable.']
-      };
-
-      const finalMsgs = [...updated, offlineMsg];
-      setMessages(finalMsgs);
-      await OfflineStore.cacheChatMessages(finalMsgs);
-    } finally {
-      setLoading(false);
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
-    }
   };
 
   return (
@@ -189,7 +86,7 @@ export function ChatScreen() {
               onPress={() => setSelectedLanguage(lang)}
             >
               <Text style={[styles.langText, selectedLanguage === lang && styles.langTextActive]}>
-                {lang === 'en' ? 'EN' : lang === 'hi' ? 'हिंदी' : 'తెలుగు'}
+                {lang === 'en' ? 'EN' : lang === 'hi' ? 'Ã Â¤Â¹Ã Â¤Â¿Ã Â¤â€šÃ Â¤Â¦Ã Â¥â‚¬' : 'Ã Â°Â¤Ã Â±â€ Ã Â°Â²Ã Â±ÂÃ Â°â€”Ã Â±Â'}
               </Text>
             </TouchableOpacity>
           ))}
@@ -237,7 +134,7 @@ export function ChatScreen() {
                   <View key={c.chunk_id || idx} style={styles.citationCard}>
                     <Text style={styles.citationTitle}>{c.title}</Text>
                     <Text style={styles.citationSource}>
-                      {c.source} {c.section ? `• Sec: ${c.section}` : ''} {c.page ? `• p.${c.page}` : ''}
+                      {c.source} {c.section ? `Ã¢â‚¬Â¢ Sec: ${c.section}` : ''} {c.page ? `Ã¢â‚¬Â¢ p.${c.page}` : ''}
                     </Text>
                   </View>
                 ))}
@@ -279,13 +176,13 @@ export function ChatScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipBar}>
           <TouchableOpacity
             style={styles.chip}
-            onPress={() => handleSend(selectedLanguage === 'hi' ? 'धान की कटाई से पहले सिंचाई कब रोकें?' : selectedLanguage === 'te' ? 'వరి పంట కోతకు ఎన్ని రోజుల ముందు నీరు ఆపాలి?' : 'When should irrigation be stopped before paddy harvest?')}
+            onPress={() => handleSend(selectedLanguage === 'hi' ? 'Ã Â¤Â§Ã Â¤Â¾Ã Â¤Â¨ Ã Â¤â€¢Ã Â¥â‚¬ Ã Â¤â€¢Ã Â¤Å¸Ã Â¤Â¾Ã Â¤Ë† Ã Â¤Â¸Ã Â¥â€¡ Ã Â¤ÂªÃ Â¤Â¹Ã Â¤Â²Ã Â¥â€¡ Ã Â¤Â¸Ã Â¤Â¿Ã Â¤â€šÃ Â¤Å¡Ã Â¤Â¾Ã Â¤Ë† Ã Â¤â€¢Ã Â¤Â¬ Ã Â¤Â°Ã Â¥â€¹Ã Â¤â€¢Ã Â¥â€¡Ã Â¤â€š?' : selectedLanguage === 'te' ? 'Ã Â°ÂµÃ Â°Â°Ã Â°Â¿ Ã Â°ÂªÃ Â°â€šÃ Â°Å¸ Ã Â°â€¢Ã Â±â€¹Ã Â°Â¤Ã Â°â€¢Ã Â±Â Ã Â°Å½Ã Â°Â¨Ã Â±ÂÃ Â°Â¨Ã Â°Â¿ Ã Â°Â°Ã Â±â€¹Ã Â°Å“Ã Â±ÂÃ Â°Â² Ã Â°Â®Ã Â±ÂÃ Â°â€šÃ Â°Â¦Ã Â±Â Ã Â°Â¨Ã Â±â‚¬Ã Â°Â°Ã Â±Â Ã Â°â€ Ã Â°ÂªÃ Â°Â¾Ã Â°Â²Ã Â°Â¿?' : 'When should irrigation be stopped before paddy harvest?')}
           >
             <Text style={styles.chipText}>Paddy Irrigation Stop</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.chip}
-            onPress={() => handleSend(selectedLanguage === 'hi' ? 'अम्लीय मिट्टी (pH 5.2) में खाद कैसे डालें?' : selectedLanguage === 'te' ? 'ఆమ్ల నేలలో ఎరువుల యాజమాన్యం ఎలా చేయాలి?' : 'How to manage fertilizer in acidic soil (pH 5.2)?')}
+            onPress={() => handleSend(selectedLanguage === 'hi' ? 'Ã Â¤â€¦Ã Â¤Â®Ã Â¥ÂÃ Â¤Â²Ã Â¥â‚¬Ã Â¤Â¯ Ã Â¤Â®Ã Â¤Â¿Ã Â¤Å¸Ã Â¥ÂÃ Â¤Å¸Ã Â¥â‚¬ (pH 5.2) Ã Â¤Â®Ã Â¥â€¡Ã Â¤â€š Ã Â¤â€“Ã Â¤Â¾Ã Â¤Â¦ Ã Â¤â€¢Ã Â¥Ë†Ã Â¤Â¸Ã Â¥â€¡ Ã Â¤Â¡Ã Â¤Â¾Ã Â¤Â²Ã Â¥â€¡Ã Â¤â€š?' : selectedLanguage === 'te' ? 'Ã Â°â€ Ã Â°Â®Ã Â±ÂÃ Â°Â² Ã Â°Â¨Ã Â±â€¡Ã Â°Â²Ã Â°Â²Ã Â±â€¹ Ã Â°Å½Ã Â°Â°Ã Â±ÂÃ Â°ÂµÃ Â±ÂÃ Â°Â² Ã Â°Â¯Ã Â°Â¾Ã Â°Å“Ã Â°Â®Ã Â°Â¾Ã Â°Â¨Ã Â±ÂÃ Â°Â¯Ã Â°â€š Ã Â°Å½Ã Â°Â²Ã Â°Â¾ Ã Â°Å¡Ã Â±â€¡Ã Â°Â¯Ã Â°Â¾Ã Â°Â²Ã Â°Â¿?' : 'How to manage fertilizer in acidic soil (pH 5.2)?')}
           >
             <Text style={styles.chipText}>Acidic Soil pH (5.2)</Text>
           </TouchableOpacity>
@@ -303,9 +200,9 @@ export function ChatScreen() {
             style={styles.input}
             placeholder={
               selectedLanguage === 'hi'
-                ? 'हिंदी में कृषि सलाह पूछें...'
+                ? 'Ã Â¤Â¹Ã Â¤Â¿Ã Â¤â€šÃ Â¤Â¦Ã Â¥â‚¬ Ã Â¤Â®Ã Â¥â€¡Ã Â¤â€š Ã Â¤â€¢Ã Â¥Æ’Ã Â¤Â·Ã Â¤Â¿ Ã Â¤Â¸Ã Â¤Â²Ã Â¤Â¾Ã Â¤Â¹ Ã Â¤ÂªÃ Â¥â€šÃ Â¤â€ºÃ Â¥â€¡Ã Â¤â€š...'
                 : selectedLanguage === 'te'
-                ? 'వ్యవసాయ సలహా అడగండి...'
+                ? 'Ã Â°ÂµÃ Â±ÂÃ Â°Â¯Ã Â°ÂµÃ Â°Â¸Ã Â°Â¾Ã Â°Â¯ Ã Â°Â¸Ã Â°Â²Ã Â°Â¹Ã Â°Â¾ Ã Â°â€¦Ã Â°Â¡Ã Â°â€”Ã Â°â€šÃ Â°Â¡Ã Â°Â¿...'
                 : 'Ask AgriSaathi in English, Hindi, Telugu...'
             }
             placeholderTextColor="#888"
@@ -315,7 +212,7 @@ export function ChatScreen() {
           />
 
           <TouchableOpacity style={styles.sendButton} onPress={() => handleSend()}>
-            <Text style={styles.sendIcon}>➔</Text>
+            <Text style={styles.sendIcon}>Ã¢Å¾â€</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -384,3 +281,4 @@ const styles = StyleSheet.create({
   sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#15803D', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   sendIcon: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' }
 });
+

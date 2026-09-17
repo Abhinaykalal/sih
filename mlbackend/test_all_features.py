@@ -19,7 +19,7 @@ if CURRENT_DIR not in sys.path:
 
 from risk_engine import compute_4zone_farm_status, evaluate_smart_irrigation, evaluate_multimodal_disease_context
 from vision_ai_model import local_vision_ai, validate_leaf_image, extract_vision_features
-from database import get_all_zones_recent_history, get_telemetry_history
+from db_layer import db_layer
 
 def run_tests():
     print("[TEST 1] Testing compute_4zone_farm_status...")
@@ -66,7 +66,7 @@ def run_tests():
     print(f"  Passed! Vision Status: {diag_res['status']}")
 
     print("[TEST 6] Testing Database Historical Telemetry...")
-    hist = get_all_zones_recent_history(limit_per_zone=10)
+    hist = db_layer.get_all_zones_recent_history(limit_per_zone=10)
     assert "zone_1" in hist and len(hist["zone_1"]) > 0, "Historical records missing for zone 1"
     print(f"  Passed! Zone 1 has {len(hist['zone_1'])} historical points, Zone 2 has {len(hist['zone_2'])} points")
 

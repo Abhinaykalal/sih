@@ -1,97 +1,133 @@
 import os
 import json
-import hashlib
-from typing import Dict, Any, List
+import csv
+from typing import Dict, Any
 
 DATASET_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "datasets")
 
 def init_dataset_structure():
-    """Initializes the dataset directory hierarchy."""
-    subdirs = ["raw", "cleaned", "train", "validation", "test", "metadata"]
+    """Initializes the dataset directory hierarchy and writes true empirical provenance."""
+    subdirs = ["raw", "cleaned", "train", "validation", "test", "metadata", "vision/images"]
     for d in subdirs:
         path = os.path.join(DATASET_ROOT, d)
         os.makedirs(path, exist_ok=True)
     
-    # Create default metadata document
+    # Calculate TRUE dataset stats
+    manifest_path = os.path.join(DATASET_ROOT, "vision", "vision_manifest.csv")
+    total_images = 0
+    classes = set()
+    
+    if os.path.exists(manifest_path):
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                total_images += 1
+                classes.add(row.get("label", "unknown"))
+    else:
+        # Fallback to filesystem counting
+        vision_dir = os.path.join(DATASET_ROOT, "vision", "images")
+        if os.path.exists(vision_dir):
+            for root, dirs, files in os.walk(vision_dir):
+                jpg_count = sum(1 for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp')))
+                if jpg_count > 0:
+                    total_images += jpg_count
+                    classes.add(os.path.basename(root))
+
     meta_path = os.path.join(DATASET_ROOT, "metadata", "dataset_provenance.json")
-    if not os.path.exists(meta_path):
-        meta = {
-            "dataset_name": "AgriSaathi Curated Rice & Crop Leaf Pathology",
-            "version": "1.2.0",
-            "license": "CC BY-SA 4.0 (Open Agricultural Research License)",
-            "sources": [
-                {"name": "PlantVillage Crop Pathology", "samples": 12500, "provenance": "Verified Laboratory & Field Captures"},
-                {"name": "ICAR Field Diagnostic Library", "samples": 2500, "provenance": "Indian Crop Pathology Advisory"}
-            ],
-            "total_images": 15000,
-            "classes": ["Rice Brown Spot", "Rice Blast", "Bacterial Leaf Blight", "Healthy Leaf"],
-            "split_strategy": "Plant-Level & Session-Level Grouping (Zero Data Leakage)",
-            "quality_checks": {
-                "duplicate_removal": "MD5/SHA256 Hash Matching",
-                "near_duplicate_filter": "Perceptual Hashing (pHash)",
-                "out_of_distribution_filter": "Color Spectrum & Aspect Ratio Validation"
-            }
-        }
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
+    meta = {
+        "dataset_name": "AgriSaathi Vision Dataset",
+        "version": "1.2.0",
+        "license": "CC BY-SA 4.0",
+        "total_images_empirically_verified": total_images,
+        "classes_present": sorted(list(classes)),
+        "split_strategy": "GroupShuffleSplit by plant group_id" if os.path.exists(manifest_path) else "Unknown"
+    }
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
 
 def generate_dataset_quality_report() -> Dict[str, Any]:
-    """Generates dataset quality and leak-prevention audit report."""
+    """Generates an honest dataset quality and audit report without fake metrics."""
     init_dataset_structure()
+    
+    manifest_path = os.path.join(DATASET_ROOT, "vision", "vision_manifest.csv")
+    vision_dir = os.path.join(DATASET_ROOT, "vision", "images")
+    
+    total_samples = 0
+    class_counts = {}
+    leakage_protected = False
+    
+    if os.path.exists(manifest_path):
+        leakage_protected = True
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                lbl = row.get("label", "unknown")
+                class_counts[lbl] = class_counts.get(lbl, 0) + 1
+                total_samples += 1
+    elif os.path.exists(vision_dir):
+        for root, dirs, files in os.walk(vision_dir):
+            jpg_count = sum(1 for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp')))
+            if jpg_count > 0:
+                class_name = os.path.basename(root)
+                class_counts[class_name] = jpg_count
+                total_samples += jpg_count
+                
+    if total_samples == 0:
+         return {
+             "status": "UNAVAILABLE",
+             "leakage_prevented": False,
+             "error": "Dataset unavailable in expected path.",
+             "total_samples": 0
+         }
+         
     return {
         "status": "VALIDATED",
-        "leakage_prevented": True,
-        "split_method": "Plant & Session Level Disjoint Split",
-        "total_samples": 15000,
-        "classes_count": 4,
-        "class_distribution": {
-            "Rice Brown Spot": 4200,
-            "Rice Blast": 3800,
-            "Bacterial Leaf Blight": 3500,
-            "Healthy Leaf": 3500
-        },
+        "leakage_prevented": leakage_protected,
+        "split_method": "GroupShuffleSplit (Group ID)" if leakage_protected else "Unsafe Random Split",
+        "total_samples": total_samples,
+        "classes_count": len(class_counts),
+        "class_distribution": class_counts,
         "quality_metrics": {
-            "corrupted_images_removed": 12,
-            "near_duplicates_removed": 145,
-            "leakage_risk_score": 0.00
+            # We strictly only report actual calculated metrics. We don't invent deduplication stats.
+            "empirical_validation": True,
+            "manifest_verified": leakage_protected
         }
     }
 
 def create_model_cards():
-    """Generates standardized Model Cards for AgriSaathi ML Models."""
-    models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "leaf_disease_ensemble")
+    """Generates standardized Model Cards without faking arbitrary accuracy scores or architectures."""
+    models_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "vision_classifier")
     os.makedirs(models_dir, exist_ok=True)
     
+    # Calculate dataset size dynamically
+    vision_dir = os.path.join(DATASET_ROOT, "vision", "images")
+    total_images = 0
+    if os.path.exists(vision_dir):
+        for root, dirs, files in os.walk(vision_dir):
+            total_images += sum(1 for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.bmp')))
+            
     card_path = os.path.join(models_dir, "model_card.md")
-    card_content = """# Model Card — AgriSaathi Leaf Disease Ensemble v1.2.0
+    card_content = f"""# Model Card — AgriSaathi Vision Classifier v1.2.0
 
 ## Model Details
 - **Developer**: AgriSaathi AI Engineering Team (SIH26180)
-- **Model Architecture**: Hybrid Ensemble (RandomForest + GradientBoosting + MobileNet Feature Extractor)
+- **Model Architecture**: LinearSVC with HOG/RGB Feature Extraction
 - **Model Version**: 1.2.0
-- **Model Hash**: `e9a41f80c619b02a`
-- **Release Date**: March 2026
 
 ## Intended Use
-- **Primary Use**: Diagnostic decision support for paddy rice and field crop leaf diseases.
+- **Primary Use**: Diagnostic decision support for field crop leaf diseases.
 - **Out-of-Scope**: Non-agricultural general object recognition.
 
 ## Training Data & Provenance
-- **Dataset**: 15,000 curated leaf photographs (PlantVillage + ICAR Field Library).
-- **Dataset License**: CC BY-SA 4.0
-- **Split Strategy**: 70% Train / 15% Validation / 15% Test grouped strictly by Plant & Session ID to prevent data leakage.
+- **Dataset**: {total_images} empirically verified leaf photographs.
+- **Split Strategy**: GroupShuffleSplit strictly by `group_id` via `vision_manifest.csv` to prevent data leakage.
 
 ## Evaluation Metrics (Held-Out Test Set)
-| Metric | Score |
-| :--- | :--- |
-| **Accuracy** | **94.2%** |
-| **Macro F1-Score** | **93.8%** |
-| **Precision** | **94.5%** |
-| **Recall** | **93.2%** |
-| **Inference Latency** | **42 ms** (Server) / **18 ms** (Edge) |
+*Metrics are generated at training time in the console output. We do not hardcode synthetic metrics in this static file.*
+*Independent edge/server latency metrics are intentionally omitted as they have not yet been benchmarked on target hardware.*
 
 ## Limitations & Known Failure Cases
-- **Low Light**: Photos taken under poor flash or night lighting reduce confidence by ~15%.
+- **Low Light**: Photos taken under poor flash or night lighting reduce confidence.
 - **Extremely Early Symptoms**: Micro-lesions < 1mm require close-up macro focus.
 """
     with open(card_path, "w", encoding="utf-8") as f:

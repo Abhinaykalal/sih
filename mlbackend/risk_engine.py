@@ -7,7 +7,7 @@ Strictly aligned with SIH Problem Statement Requirements:
 4. Edge AI Offline Store & Sync Architecture
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 def evaluate_smart_irrigation(soil_moisture: float, air_temp: float, rain_forecast_prob: float) -> Dict[str, Any]:
     """
@@ -20,7 +20,7 @@ def evaluate_smart_irrigation(soil_moisture: float, air_temp: float, rain_foreca
         recommendation = f"Soil saturated ({soil_moisture}%). Halt pump, open drainage furrows to avert root rot & hypoxia."
         action_code = "HALT_PUMP_DRAIN"
         color = "PURPLE"
-    elif soil_moisture < 20.0 and rain_forecast_prob < 50.0:
+    elif soil_moisture < 25.0 and rain_forecast_prob < 50.0:
         status = "IRRIGATE IMMEDIATELY"
         recommendation = f"Soil moisture is critical ({soil_moisture}%). Apply drip irrigation now."
         action_code = "START_PUMP"
@@ -79,7 +79,7 @@ def evaluate_pest_trend(pest_counts: list) -> Dict[str, Any]:
         "color": color
     }
 
-def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float, air_temp: float, humidity: float, ec_salinity: float = 1.2) -> Dict[str, Any]:
+def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float, air_temp: float, humidity: float, ec_salinity: Optional[float] = None) -> Dict[str, Any]:
     """
     MULTIMODAL DISEASE & NUTRIENT DEFICIENCY DIAGNOSIS:
     Fuses visual leaf features with soil moisture, EC salinity, and microclimate to prevent
@@ -108,7 +108,7 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
         }
 
     # 3. True Nitrogen (N) Deficiency (Moisture normal, foliage pale green/yellow from tips)
-    if ("nitrogen" in v_lower or "chlorosis" in v_lower or "yellow" in v_lower) and soil_moisture >= 25.0 and ec_salinity <= 1.8:
+    if ("nitrogen" in v_lower or "chlorosis" in v_lower or "yellow" in v_lower) and soil_moisture >= 25.0 and (ec_salinity is None or ec_salinity <= 1.8):
         return {
             "diagnosis": "Nitrogen (N) Deficiency Chlorosis",
             "confidence_pct": None,
@@ -148,7 +148,7 @@ def evaluate_multimodal_disease_context(vision_class: str, soil_moisture: float,
         }
 
     # 7. Salinity Root Burn
-    if ec_salinity > 2.2:
+    if ec_salinity is not None and ec_salinity > 2.2:
         return {
             "diagnosis": "Osmotic Root Burn / Soil Salinity Toxicity",
             "confidence_pct": None,
@@ -176,11 +176,13 @@ def compute_4zone_farm_status(sensor_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     z1_moisture = float(sensor_data.get("z1_moisture", 45.0) or 45.0)
     z2_moisture = float(sensor_data.get("z2_moisture", 16.0) or 16.0)
-    z3_pest_count = int(sensor_data.get("z3_pest_count", 25) or 25)
+    z3_pest_count = sensor_data.get("z3_pest_count")
+    z3_pest_count = int(z3_pest_count) if z3_pest_count is not None else 0
     z4_humidity = float(sensor_data.get("z4_humidity", 90.0) or 90.0)
     air_temp = float(sensor_data.get("air_temp", 35.0) or 35.0)
     rain_prob = float(sensor_data.get("rain_prob", 20.0) or 20.0)
-    ec_salinity = float(sensor_data.get("ec_salinity", 1.2) or 1.2)
+    ec_salinity = sensor_data.get("ec_salinity")
+    ec_salinity = float(ec_salinity) if ec_salinity is not None else None
 
     irrigation_eval = evaluate_smart_irrigation(z2_moisture, air_temp, rain_prob)
     pest_eval = evaluate_pest_trend([4, 7, 13, z3_pest_count])
@@ -321,7 +323,13 @@ def evaluate_lwd_fungal_risk(temp_c: float = 25.0, humidity: float = 90.0) -> Di
         "recommendation": "Apply preventive bio-fungicide spray." if is_high else "Conditions clear."
     }
 
-def evaluate_fertilizer_burn_ec(soil_ec_ds_m: float = 1.2, soil_moisture_pct: float = 20.0) -> Dict[str, Any]:
+def evaluate_fertilizer_burn_ec(soil_ec_ds_m: Optional[float] = None, soil_moisture_pct: float = 20.0) -> Dict[str, Any]:
+    if soil_ec_ds_m is None:
+        return {
+            "is_toxic": False,
+            "salinity_status": "UNKNOWN (NO SENSOR)",
+            "recommendation": "No EC sensor data available."
+        }
     is_toxic = soil_ec_ds_m > 2.2
     return {
         "is_toxic": is_toxic,

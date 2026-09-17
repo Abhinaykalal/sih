@@ -12,18 +12,18 @@ Enforces physical sensor validation ranges (soil moisture 0-100%, ADC 0-4095, et
 
 import json
 import time
+import ssl
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple, Union
+import paho.mqtt.client as mqtt
+import threading
 
 try:
     from .config import settings
+    from .db_layer import db_layer
 except ImportError:
     from config import settings
-
-# Global thread-safe telemetry cache per device
-_latest_telemetry: Dict[str, Dict[str, Any]] = {}
-_device_lifecycle: Dict[str, Dict[str, Any]] = {}
-_command_history: List[Dict[str, Any]] = []
+    from db_layer import db_layer
 
 def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]) -> Tuple[bool, Optional[Dict[str, Any]], List[str]]:
     """
@@ -58,6 +58,7 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
             soil_moisture = float(soil_moisture)
             if not (0.0 <= soil_moisture <= 100.0):
                 errors.append(f"soil_moisture_pct out of range (0-100): {soil_moisture}")
+                soil_moisture = None
         except (ValueError, TypeError):
             errors.append(f"Invalid numeric value for soil_moisture_pct: {soil_moisture}")
             soil_moisture = None
@@ -69,6 +70,7 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
             soil_adc = int(soil_adc)
             if not (0 <= soil_adc <= 4095):
                 errors.append(f"soil_raw_adc out of range (0-4095): {soil_adc}")
+                soil_adc = None
         except (ValueError, TypeError):
             errors.append(f"Invalid integer for soil_raw_adc: {soil_adc}")
             soil_adc = None
@@ -80,6 +82,7 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
             temp_c = float(temp_c)
             if not (-10.0 <= temp_c <= 60.0):
                 errors.append(f"temperature_c out of range (-10 to 60): {temp_c}")
+                temp_c = None
         except (ValueError, TypeError):
             errors.append(f"Invalid numeric value for temperature_c: {temp_c}")
             temp_c = None
@@ -91,6 +94,7 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
             humidity = float(humidity)
             if not (0.0 <= humidity <= 100.0):
                 errors.append(f"humidity_pct out of range (0-100): {humidity}")
+                humidity = None
         except (ValueError, TypeError):
             errors.append(f"Invalid numeric value for humidity_pct: {humidity}")
             humidity = None
@@ -198,117 +202,231 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
 
 
 class MQTTServiceManager:
-    """Manages MQTT subscriptions, commands, and device lifecycles."""
+    """Manages true MQTT subscriptions, commands, and device lifecycles connected to SQLite."""
     
     def __init__(self):
-        self.connected = False
         self.broker = settings.MQTT_BROKER_HOST
         self.port = settings.MQTT_BROKER_PORT
         self.uplink_topic = settings.MQTT_UPLINK_TOPIC
         self.downlink_topic = settings.MQTT_DOWNLINK_TOPIC
         self.status_topic = settings.MQTT_STATUS_TOPIC
+        self.connected = False
+        
+        # Enforce Paho MQTT v2 Callback API for Production Stability
+        try:
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="agrisaathi_backend_" + str(int(time.time())))
+        except AttributeError:
+            # Fallback if v1 is installed despite requirements
+            self.client = mqtt.Client(client_id="agrisaathi_backend_" + str(int(time.time())))
+        
+        # Callbacks (v2 signatures)
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
+        self.client.on_message = self.on_message
+
+        # Authentication
+        if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
+            self.client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
+
+        # TLS / Insecure Handling
+        if settings.MQTT_USE_TLS:
+            if settings.ALLOW_INSECURE_MQTT:
+                print("WARNING: ALLOW_INSECURE_MQTT is set. TLS certificates will NOT be verified!")
+                self.client.tls_set(cert_reqs=ssl.CERT_NONE)
+                self.client.tls_insecure_set(True)
+            else:
+                self.client.tls_set(cert_reqs=ssl.CERT_REQUIRED) # Strictly verify broker CA
+
         self._init_default_node()
+        
+        # Run resilient connection in a background thread so FastAPI never blocks on boot
+        # if the broker is temporarily down.
+        self._conn_thread = threading.Thread(target=self._resilient_connect_loop, daemon=True)
+        self._conn_thread.start()
+
+    def _resilient_connect_loop(self):
+        """Exponential backoff reconnect loop for reliable boot-up."""
+        attempt = 0
+        while not self.connected:
+            try:
+                self.client.connect(self.broker, self.port, 60)
+                self.client.loop_start()
+                break # Exit loop once successfully connected and loop started
+            except Exception as e:
+                attempt += 1
+                backoff = min(60, 2 ** attempt)
+                print(f"[MQTT] Connection Failed: {e}. Retrying in {backoff}s (Attempt {attempt})...")
+                time.sleep(backoff)
 
     def _init_default_node(self):
-        """Pre-populate ESP32_NODE_01 with safe default status."""
-        _device_lifecycle["ESP32_NODE_01"] = {
-            "device_id": "ESP32_NODE_01",
-            "status": "online",
-            "last_seen_seconds_ago": 0,
-            "last_seen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "uplink_topic": self.uplink_topic,
-            "downlink_topic": self.downlink_topic,
-            "status_topic": self.status_topic,
-            "capabilities": {
+        """Pre-populate ESP32_NODE_01 with safe default status in db if not exists."""
+        db_layer.update_device_lifecycle(
+            device_id="ESP32_NODE_01",
+            status="unknown",
+            last_seen_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            is_online=False,
+            capabilities_json=json.dumps({
                 "soil_moisture": True,
                 "temperature": True,
                 "humidity": True,
                 "sunlight": True,
                 "vibration": False,
                 "npk": False
-            }
-        }
-        _latest_telemetry["ESP32_NODE_01"] = {
-            "device_id": "ESP32_NODE_01",
-            "received_at": None,
-            "telemetry": {
-                "soil_moisture_pct": None,
-                "soil_raw_adc": None,
-                "temperature_c": None,
-                "humidity_pct": None,
-                "sunlight_detected": None,
-                "vibration_detected": None,
-                "vibration_rms": None,
-                "nitrogen": None,
-                "phosphorus": None,
-                "potassium": None
-            },
-            "actuator": {
-                "pump_active": False
-            },
-            "edge_ai": {
-                "last_scan_result": None,
-                "confidence_pct": None
-            },
-            "data_source": "UNAVAILABLE"
-        }
+            })
+        )
+
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        # Handle both v1 and v2 callbacks
+        code = rc.value if hasattr(rc, "value") else rc
+        if code == 0:
+            self.connected = True
+            print("MQTT Connected successfully. Subscribing to topics...")
+            self.client.subscribe("agrisaathi/nodes/+/telemetry", qos=1)
+            self.client.subscribe("agrisaathi/nodes/+/status", qos=1)
+            self.client.subscribe("agrisaathi/nodes/+/ack", qos=1)
+        else:
+            self.connected = False
+            print(f"MQTT Connection failed with code {code}")
+
+    def on_disconnect(self, client, userdata, rc, properties=None, *args, **kwargs):
+        self.connected = False
+        print("MQTT Disconnected. Reconnecting...")
+
+    def on_message(self, client, userdata, msg):
+        topic = msg.topic
+        payload = msg.payload.decode('utf-8', errors='ignore')
+        
+        try:
+            parts = topic.split("/")
+            topic_device_id = parts[2] if len(parts) >= 3 else "unknown"
+            
+            if topic.endswith("/telemetry"):
+                self.handle_telemetry_message(payload, topic_device_id=topic_device_id)
+            elif topic.endswith("/status"):
+                self.handle_status_message(topic_device_id, payload)
+            elif topic.endswith("/ack"):
+                self.handle_ack_message(topic_device_id, payload)
+        except Exception as e:
+            print(f"Error processing MQTT message on {topic}: {e}")
 
     def handle_status_message(self, device_id: str, status_payload: str):
         """Handles online / offline / lwt messages on status topic."""
-        status_clean = status_payload.strip().lower()
+        status_clean = "unknown"
+        try:
+            # Parse JSON status if available (e.g. LWT or online packet)
+            data = json.loads(status_payload)
+            status_clean = data.get("status", "unknown").strip().lower()
+        except Exception:
+            status_clean = status_payload.strip().lower()
+
         if status_clean not in ("online", "offline", "unknown"):
             status_clean = "unknown"
             
-        lifecycle = _device_lifecycle.setdefault(device_id, {
-            "device_id": device_id,
-            "capabilities": {}
-        })
-        lifecycle["status"] = status_clean
-        lifecycle["last_seen_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        lifecycle["last_seen_seconds_ago"] = 0
-        if status_clean == "online":
-            lifecycle["last_online_at"] = lifecycle["last_seen_at"]
-        elif status_clean == "offline":
-            lifecycle["last_offline_at"] = lifecycle["last_seen_at"]
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        db_layer.update_device_lifecycle(
+            device_id=device_id,
+            status=status_clean,
+            last_seen_at=now_iso,
+            is_online=(status_clean == "online")
+        )
 
-    def handle_telemetry_message(self, raw_payload_str: str) -> Dict[str, Any]:
-        """Ingests, validates, and stores an incoming telemetry payload."""
+    def handle_ack_message(self, device_id: str, payload_str: str):
+        """Processes cryptographically signed hardware ACKs over MQTT."""
+        try:
+            ack_payload = json.loads(payload_str)
+            from mlbackend.pump_controller import pump_controller
+            # The ACK payload should contain the command_id, but the signature check guarantees authenticity
+            command_id = ack_payload.get("command_id")
+            if command_id:
+                pump_controller.acknowledge_command(command_id, ack_payload)
+        except Exception as e:
+            print(f"Error handling ACK for {device_id}: {e}")
+
+    def handle_telemetry_message(self, raw_payload_str: str, topic_device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Ingests, validates, and stores an incoming telemetry payload to SQLite.
+           Includes anti-spoofing cross-validation with MQTT topic."""
         ok, record, errors = parse_and_validate_telemetry_payload(raw_payload_str)
         if not ok or not record:
             return {"status": "error", "errors": errors}
 
         device_id = record["device_id"]
-        _latest_telemetry[device_id] = record
+        
+        # Anti-Spoofing: Ensure topic identity matches payload claims
+        if topic_device_id and topic_device_id != "unknown" and topic_device_id != device_id:
+            print(f"[SECURITY] REJECTED_SPOOFING: Payload claims {device_id} but published on topic for {topic_device_id}")
+            return {"status": "error", "errors": ["SPOOFING_DETECTED_TOPIC_MISMATCH"]}
+        
+        # Persist telemetry via unified DB layer
+        db_layer.store_telemetry_packet(record)
         
         # Mark device online upon valid packet
-        lifecycle = _device_lifecycle.setdefault(device_id, {
-            "device_id": device_id,
-            "capabilities": {}
-        })
-        lifecycle["status"] = "online"
-        lifecycle["last_seen_at"] = record["received_at"]
-        lifecycle["last_seen_seconds_ago"] = 0
-        lifecycle["last_online_at"] = record["received_at"]
+        db_layer.update_device_lifecycle(
+            device_id=device_id,
+            status="online",
+            last_seen_at=record["received_at"],
+            is_online=True
+        )
 
         return {"status": "success", "device_id": device_id, "errors": errors}
 
     def get_latest_telemetry(self, device_id: str = "ESP32_NODE_01") -> Optional[Dict[str, Any]]:
-        """Returns the most recent verified telemetry frame for a node."""
-        return _latest_telemetry.get(device_id)
+        """Returns the most recent verified telemetry frame for a node directly from SQLite."""
+        # Querying canonical_telemetry
+        import sqlite3
+        try:
+            from .db_layer import ANALYTICS_DB_PATH
+        except ImportError:
+            from db_layer import ANALYTICS_DB_PATH
+            
+        conn = sqlite3.connect(ANALYTICS_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM canonical_telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 1", (device_id,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            # Reconstruct the dict structure
+            d = dict(row)
+            try:
+                raw = json.loads(d.get("raw_payload", "{}"))
+            except:
+                raw = {}
+                
+            return {
+                "device_id": d["device_id"],
+                "received_at": d["received_at"],
+                "received_at_timestamp": d["device_timestamp"],
+                "telemetry": {
+                    "soil_moisture_pct": d["soil_moisture_pct"],
+                    "soil_raw_adc": d["soil_raw_adc"],
+                    "temperature_c": d["temperature_c"],
+                    "humidity_pct": d["humidity_pct"],
+                    "sunlight_detected": bool(d["sunlight_detected"]) if d["sunlight_detected"] is not None else None,
+                    "vibration_detected": bool(d["vibration_detected"]) if d["vibration_detected"] is not None else None,
+                    "vibration_rms": d["vibration_rms"],
+                    "nitrogen": d["nitrogen"],
+                    "phosphorus": d["phosphorus"],
+                    "potassium": d["potassium"]
+                },
+                "actuator": {
+                    "pump_active": bool(d["pump_active"]) if d["pump_active"] is not None else None
+                },
+                "edge_ai": {
+                    "last_scan_result": d["edge_ai_result"],
+                    "confidence_pct": d["edge_ai_confidence"]
+                },
+                "raw_payload": raw,
+                "data_source": d["data_source"]
+            }
+        return None
 
     def get_device_lifecycle(self, device_id: str = "ESP32_NODE_01") -> Optional[Dict[str, Any]]:
-        """Returns online/offline status and capability dictionary."""
-        node = _device_lifecycle.get(device_id)
-        if node:
-            # Recalculate dynamic last_seen
-            last_ts = _latest_telemetry.get(device_id, {}).get("received_at_timestamp")
-            if last_ts:
-                node["last_seen_seconds_ago"] = max(0, int(time.time() - last_ts))
-        return node
+        """Returns online/offline status from SQLite."""
+        return db_layer.get_device_lifecycle(device_id)
 
     def publish_command(self, device_id: str, command: str, duration_sec: int = 0, reason: str = "") -> Dict[str, Any]:
         """
-        Publishes an actuator downlink command to agrisaathi/nodes/{device_id}/commands.
+        Publishes an actuator downlink command to agrisaathi/nodes/{device_id}/commands with QoS 1.
         """
         cmd_id = f"cmd_{int(time.time())}_{device_id}"
         payload = {
@@ -320,15 +438,30 @@ class MQTTServiceManager:
             "timestamp": int(time.time())
         }
         
-        # Record in local audit history
-        _command_history.append({
+        topic = f"agrisaathi/nodes/{device_id}/commands"
+        if self.connected:
+            try:
+                # QoS 1 for durable delivery
+                self.client.publish(topic, json.dumps(payload), qos=1)
+            except Exception as e:
+                print(f"MQTT Publish Error: {e}")
+
+        # Record in durable local audit history via db_layer
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        record = {
             "command_id": cmd_id,
             "device_id": device_id,
-            "command": command,
+            "command_type": command,
             "status": "published",
-            "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "payload": payload
-        })
+            "rain_lockout": False,
+            "reason": reason,
+            "duration_sec": duration_sec,
+            "created_at": now_iso,
+            "published_at": now_iso,
+            "idempotency_key": None,
+            "requested_by": None
+        }
+        db_layer.store_command(record)
 
         return {
             "status": "published",

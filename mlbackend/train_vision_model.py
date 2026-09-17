@@ -251,10 +251,49 @@ def main() -> None:
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(artifact, args.output)
+    
+    import uuid
+    from datetime import datetime, timezone
+    from mlbackend.crypto_utils import sign_metadata
+
+    model_hash = sha256_file(args.output)
+    dataset_hash = sha256_file(manifest) if manifest and manifest.exists() else "untracked_dataset"
+    payload = {
+        "model_version": f"v1.0.0-{uuid.uuid4().hex[:8]}",
+        "artifact": {
+            "filename": args.output.name,
+            "sha256": model_hash
+        },
+        "dataset": {
+            "manifest_sha256": dataset_hash,
+            "image_count": len(records),
+            "class_count": len(labels)
+        },
+        "training_date": datetime.now(timezone.utc).isoformat(),
+        "algorithm": "LinearSVC (HOG/RGB)",
+        "feature_extraction_config": artifact["feature_config"],
+        "class_labels": labels,
+        "evaluation": {
+            "metric": "macro_f1",
+            "value": metrics["test"]["macro_f1"],
+            "dataset": "test_split_20_pct"
+        }
+    }
+    
+    signature = sign_metadata(payload)
+    final_metadata = {
+        "payload": payload,
+        "signature": signature
+    }
+    
+    meta_path = args.output.with_name("vision_model_metadata.json")
+    meta_path.write_text(json.dumps(final_metadata, indent=2), encoding="utf-8")
+    
     args.output.with_suffix(".metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     print("\nTraining complete! Metrics on held-out evaluation data:")
     print(json.dumps(metrics, indent=2))
     print(f"\nSaved REAL-IMAGE vision artifact: {args.output}")
+    print(f"Saved Metadata: {meta_path}")
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ dist/
 ml-backend/.env
 mlbackend/.env
 *.env
+secrets.h
 
 # Logs
 npm-debug.log*
@@ -49,7 +50,6 @@ Thumbs.db
 *.onnx
 models/*.joblib
 models/*.pkl
-!mlbackend/*.joblib
 
 # Deployment
 .vercel
@@ -101,5 +101,20 @@ tmp/
 temp/
 cloudflared.exe
 cloudflared.log
+
+# Archive / backup zips (never commit large binary dumps)
+archive*.zip
+*.backup.zip
+
+# Extracted APK folders
+vaibhav_apk_extracted/
+*_apk_extracted/
+
+# One-off development scripts (not project source code)
+inject_leaf_ai.py
+find_nav_pattern.py
+find_ai_url.py
+check_prs.py
+update_tunnel.ps1
 
 

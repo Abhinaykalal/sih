@@ -1,30 +1,19 @@
 {
-  "dataset_name": "AgriSaathi Curated Rice & Crop Leaf Pathology",
+  "dataset_name": "AgriSaathi Vision Dataset",
   "version": "1.2.0",
-  "license": "CC BY-SA 4.0 (Open Agricultural Research License)",
-  "sources": [
-    {
-      "name": "PlantVillage Crop Pathology",
-      "samples": 12500,
-      "provenance": "Verified Laboratory & Field Captures"
-    },
-    {
-      "name": "ICAR Field Diagnostic Library",
-      "samples": 2500,
-      "provenance": "Indian Crop Pathology Advisory"
-    }
+  "license": "CC BY-SA 4.0",
+  "total_images_empirically_verified": 100,
+  "classes_present": [
+    "Pepper__bell___Bacterial_spot",
+    "Pepper__bell___healthy",
+    "Potato___Early_blight",
+    "Potato___Late_blight",
+    "Potato___healthy",
+    "Tomato_Bacterial_spot",
+    "Tomato_Early_blight",
+    "Tomato_Late_blight",
+    "Tomato_Leaf_Mold",
+    "Tomato_Septoria_leaf_spot"
   ],
-  "total_images": 15000,
-  "classes": [
-    "Rice Brown Spot",
-    "Rice Blast",
-    "Bacterial Leaf Blight",
-    "Healthy Leaf"
-  ],
-  "split_strategy": "Plant-Level & Session-Level Grouping (Zero Data Leakage)",
-  "quality_checks": {
-    "duplicate_removal": "MD5/SHA256 Hash Matching",
-    "near_duplicate_filter": "Perceptual Hashing (pHash)",
-    "out_of_distribution_filter": "Color Spectrum & Aspect Ratio Validation"
-  }
+  "split_strategy": "GroupShuffleSplit by plant group_id"
 }

@@ -1,0 +1,51 @@
+{
+  "payload": {
+    "model_version": "v1.0.0-1c8aec76",
+    "artifact": {
+      "filename": "vision_model.joblib",
+      "sha256": "5027514ab5d93459ac9cd846dad0db331bc8f9e66368afe2aa86b5335f6a2724"
+    },
+    "dataset": {
+      "manifest_sha256": "a0de5176834660b1c9fa754163d85cf5aa2fd38eab865461bf9aa267e06cf618",
+      "image_count": 100,
+      "class_count": 10
+    },
+    "training_date": "2026-09-17T07:50:56.314830+00:00",
+    "algorithm": "LinearSVC (HOG/RGB)",
+    "feature_extraction_config": {
+      "image_size": [
+        128,
+        128
+      ],
+      "hog_orientations": 9,
+      "hog_pixels_per_cell": [
+        8,
+        8
+      ],
+      "hog_cells_per_block": [
+        2,
+        2
+      ],
+      "rgb_hist_bins": 16,
+      "feature_length": 8148
+    },
+    "class_labels": [
+      "Pepper__bell___Bacterial_spot",
+      "Pepper__bell___healthy",
+      "Potato___Early_blight",
+      "Potato___Late_blight",
+      "Potato___healthy",
+      "Tomato_Bacterial_spot",
+      "Tomato_Early_blight",
+      "Tomato_Late_blight",
+      "Tomato_Leaf_Mold",
+      "Tomato_Septoria_leaf_spot"
+    ],
+    "evaluation": {
+      "metric": "macro_f1",
+      "value": 0.05,
+      "dataset": "test_split_20_pct"
+    }
+  },
+  "signature": "dummy_signature"
+}

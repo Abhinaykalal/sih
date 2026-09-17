@@ -80,6 +80,9 @@ class DecisionItem(BaseModel):
     inputs_missing: List[str] = Field(default_factory=list)
     urgency: Optional[str] = None
     target_water_mm: Optional[float] = None
+    # Traceability fields surfaced in rendered advisory (audit items 169-173)
+    threshold_source: Optional[str] = None
+    validation_status: str = "UNVALIDATED_AGAINST_FIELD_OUTCOMES"
 
 
 class AdvisoryProvenanceResponse(BaseModel):
@@ -279,7 +282,7 @@ def render_advisory_text(
     air_temp_item = field_status.get("air_temperature_c")
     if air_temp_item and air_temp_item.value is not None:
         prov_label = "Simulated" if air_temp_item.provenance == DataProvenance.SIMULATED.value else "Live sensor"
-        lines.append(f"- Air temperature: {air_temp_item.value}{air_temp_item.unit or '°C'} [{prov_label}]")
+        lines.append(f"- Air temperature: {air_temp_item.value}{air_temp_item.unit or '\u00b0C'} [{prov_label}]")
     else:
         lines.append("- Air temperature: Not available [Unavailable]")
 
@@ -334,6 +337,8 @@ def render_advisory_text(
     lines.append(f"- Recommendation: {decision.result}")
     lines.append(f"- Provenance: {decision.provenance}")
     lines.append(f"- Explanation: {decision.explanation}")
+    if hasattr(decision, "threshold_source") and decision.threshold_source:
+        lines.append(f"- Threshold source: {decision.threshold_source}")
     lines.append("")
 
     # 5. Data Quality Summary
@@ -365,5 +370,21 @@ def render_advisory_text(
     # Overall advisory badge
     overall = determine_overall_status(field_status, weather, knowledge, is_demo_mode=is_demo_mode)
     lines.append(f"- Overall advisory: {overall.replace('_', ' ').capitalize()}")
+
+    # 6. Domain Limitations (Audit Items 169-173)
+    lines.append("")
+    lines.append("Advisory limitations")
+    lines.append(
+        "- Decision engine: Deterministic rule-based thresholds from ICAR/FAO published guidelines."
+    )
+    lines.append(
+        "- Validation: These thresholds have NOT been empirically validated against this farm's field outcomes."
+    )
+    lines.append(
+        "- Domain authority: Not a substitute for agronomist-reviewed recommendations."
+    )
+    lines.append(
+        "- Action: Always confirm with a qualified agricultural extension officer before commercial decisions."
+    )
 
     return "\n".join(lines)

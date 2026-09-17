@@ -3,11 +3,18 @@ AgriSaathi AI — Actuator Command System & Rain Lockout Enforcement
 ==================================================================
 Manages physical pump and bio-mister actuations for field IoT nodes.
 Enforces strict Rain Lockout: blocks pump activation when rain is forecasted or active.
-Maintains verifiable command lifecycles: requested -> published -> acknowledged -> executed.
+Maintains verifiable command lifecycles: requested -> published -> received -> actuation_accepted -> executed.
+
+Security: Zero-Trust architecture with HMAC-SHA256 signatures, sequence tracking, and nonces.
 """
 
 import time
 import uuid
+import json
+import os
+import hmac
+import hashlib
+import binascii
 from typing import Dict, Any, Optional, List, Tuple
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
@@ -16,14 +23,12 @@ try:
     from .mqtt_service import mqtt_manager
     from .config import settings
     from .internal_notifications import notification_service, NotificationType
+    from .db_layer import db_layer
 except ImportError:
     from mqtt_service import mqtt_manager
     from config import settings
     from internal_notifications import notification_service, NotificationType
-
-# In-memory command registry and idempotency cache
-_commands_db: Dict[str, Dict[str, Any]] = {}
-_idempotency_map: Dict[str, str] = {} # idempotency_key -> command_id
+    from db_layer import db_layer
 
 class PumpCommandRequest(BaseModel):
     device_id: str = "ESP32_NODE_01"
@@ -33,21 +38,10 @@ class PumpCommandRequest(BaseModel):
     farm_id: Optional[str] = None
     zone_id: Optional[str] = None
     idempotency_key: Optional[str] = None
-    manual_override: bool = False
+    # manual_override is explicitly removed to prevent bypassing safety
     active_rain: bool = False
     rain_probability_pct: float = 0.0
     rain_forecast_mm: float = 0.0
-
-class PumpCommandResult(BaseModel):
-    command_id: str
-    device_id: str
-    command_type: str
-    status: str # requested | blocked | published | acknowledged | executed | failed | expired
-    rain_lockout: bool
-    reason: str
-    created_at: str
-    published_at: Optional[str] = None
-    idempotency_key: Optional[str] = None
 
 class RainLockoutDecision:
     """Evaluates unified Rain Lockout policy across sensor & forecast feeds."""
@@ -71,22 +65,21 @@ class RainLockoutDecision:
 class PumpCommandController:
     """Controls and audits all actuator dispatch operations."""
 
-    def __init__(self):
-        self._audit_log: List[Dict[str, Any]] = []
-
     def dispatch(self, req: PumpCommandRequest, actor_id: Optional[str] = None) -> Dict[str, Any]:
-        """Validates, checks rain lockout, and executes actuator commands."""
+        """Validates, checks rain lockout, and executes actuator commands with cryptography."""
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         
         # 1. Idempotency Check
-        if req.idempotency_key and req.idempotency_key in _idempotency_map:
-            existing_id = _idempotency_map[req.idempotency_key]
-            if existing_id in _commands_db:
-                return _commands_db[existing_id]
+        if req.idempotency_key:
+            existing_id = db_layer.check_idempotency(req.idempotency_key)
+            if existing_id:
+                existing_cmd = db_layer.get_command(existing_id)
+                if existing_cmd:
+                    return existing_cmd
 
         cmd_id = f"cmd_{uuid.uuid4().hex[:12]}"
         if req.idempotency_key:
-            _idempotency_map[req.idempotency_key] = cmd_id
+            db_layer.set_idempotency(req.idempotency_key, cmd_id)
 
         # 2. Rain Lockout Check for Activation Commands
         is_activation = req.command_type in ("PUMP_ON", "MISTER_ON")
@@ -96,8 +89,8 @@ class PumpCommandController:
             rain_mm=req.rain_forecast_mm
         )
 
-        if is_activation and is_locked_out and not req.manual_override:
-            # Command is BLOCKED by safety guardrails
+        if is_activation and is_locked_out:
+            # Command is BLOCKED by safety guardrails. No manual overrides allowed.
             record = {
                 "command_id": cmd_id,
                 "device_id": req.device_id,
@@ -110,8 +103,7 @@ class PumpCommandController:
                 "idempotency_key": req.idempotency_key,
                 "requested_by": actor_id
             }
-            _commands_db[cmd_id] = record
-            self._log_audit("ACTUATOR_COMMAND_BLOCKED", req.device_id, record)
+            db_layer.store_command(record)
             try:
                 notification_service.create_notification(
                     notification_type=NotificationType.PUMP_COMMAND_BLOCKED.value,
@@ -126,87 +118,142 @@ class PumpCommandController:
                 pass
             return record
 
-        # 3. Publish to MQTT Downlink Topic
+        # 3. Cryptographic Signature Generation
+        device_reg = db_layer.get_device_registry(req.device_id)
+        if not device_reg or not device_reg.get("command_secret"):
+            # Fallback for dev mode if not registered
+            # In production, we'd raise an exception. For compatibility, we'll try to use a default or fail.
+            key_id = "v1"
+            secret = getattr(settings, "EDGE_COMMAND_SECRET", None)
+            if not secret:
+                raise ValueError(f"No command_secret registered for {req.device_id} and EDGE_COMMAND_SECRET not configured.")
+        else:
+            secret = device_reg["command_secret"]
+            key_id = device_reg["key_id"]
+
+        # Calculate next sequence
+        # For dispatching, we use timestamp millis as monotonic sequence for simplicity across instances, 
+        # but ensuring it strictly increases.
+        timestamp_ms = int(time.time() * 1000)
+        sequence = timestamp_ms
+        nonce = binascii.hexlify(os.urandom(8)).decode("utf-8")
+        
+        # Canonical format: device_id|key_id|sequence|timestamp|nonce|command|duration
+        canonical_str = f"{req.device_id}|{key_id}|{sequence}|{timestamp_ms}|{nonce}|{req.command_type}|{req.duration_sec}"
+        
+        signature = hmac.new(
+            secret.encode('utf-8'),
+            canonical_str.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        # 4. Publish to MQTT Downlink Topic
         record = {
             "command_id": cmd_id,
             "device_id": req.device_id,
             "command_type": req.command_type,
             "status": "published",
             "rain_lockout": False,
-            "reason": req.reason if not req.manual_override else f"MANUAL_OVERRIDE: {req.reason}",
+            "reason": req.reason,
             "duration_sec": req.duration_sec,
             "created_at": now_iso,
             "published_at": now_iso,
             "idempotency_key": req.idempotency_key,
             "requested_by": actor_id
         }
-        _commands_db[cmd_id] = record
+        db_layer.store_command(record)
+
+        payload = {
+            "command_id": cmd_id,
+            "device_id": req.device_id,
+            "key_id": key_id,
+            "sequence": sequence,
+            "timestamp": timestamp_ms,
+            "nonce": nonce,
+            "command": req.command_type,
+            "duration_sec": req.duration_sec,
+            "signature": signature
+        }
 
         # Dispatch through MQTT Service Manager
         if mqtt_manager:
-            mqtt_manager.publish_command(
-                device_id=req.device_id,
-                command=req.command_type,
-                duration_sec=req.duration_sec,
-                reason=record["reason"]
-            )
+            import json
+            mqtt_manager.client.publish(f"agrisaathi/nodes/{req.device_id}/commands", json.dumps(payload), qos=1)
 
-        self._log_audit("ACTUATOR_COMMAND_PUBLISHED", req.device_id, record)
         return record
 
+    def verify_ack_signature(self, ack_payload: Dict[str, Any]) -> bool:
+        """Verifies HMAC signature on incoming ACK payload."""
+        device_id = ack_payload.get("device_id")
+        key_id = ack_payload.get("key_id", "v1")
+        sequence = ack_payload.get("sequence")
+        status = ack_payload.get("status")
+        relay_state = "1" if ack_payload.get("relay_state") else "0"
+        timestamp = ack_payload.get("timestamp")
+        provided_sig = ack_payload.get("signature")
+        
+        if not all([device_id, sequence, status, timestamp, provided_sig]):
+            return False
+
+        device_reg = db_layer.get_device_registry(device_id)
+        if not device_reg or not device_reg.get("command_secret"):
+            secret = getattr(settings, "EDGE_COMMAND_SECRET", None)
+            if not secret: return False
+        else:
+            secret = device_reg["command_secret"]
+
+        # Canonical format for ACK: device_id|key_id|sequence|status|relay_state|timestamp
+        canonical_str = f"{device_id}|{key_id}|{sequence}|{status}|{relay_state}|{timestamp}"
+        
+        expected_sig = hmac.new(
+            secret.encode('utf-8'),
+            canonical_str.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        return hmac.compare_digest(expected_sig, provided_sig)
+
     def acknowledge_command(self, command_id: str, ack_payload: Optional[Dict[str, Any]] = None) -> bool:
-        """Records hardware receipt acknowledgement."""
-        if command_id in _commands_db:
-            cmd = _commands_db[command_id]
-            cmd["status"] = "acknowledged"
+        """Records hardware receipt acknowledgement with cryptographic verification."""
+        if not ack_payload or not self.verify_ack_signature(ack_payload):
+            return False # Reject invalid HMAC ACK
+            
+        cmd = db_layer.get_command(command_id)
+        if cmd:
+            status = ack_payload.get("status", "UNKNOWN")
+            
+            # Map strict ACK states
+            cmd["status"] = status
             cmd["acknowledged_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             cmd["acknowledgement_payload"] = ack_payload
+            
+            db_layer.update_command_status(command_id, {
+                "status": status, 
+                "acknowledged_at": cmd["acknowledged_at"],
+                "acknowledgement_payload": json.dumps(ack_payload) if ack_payload else None
+            })
+            
+            if status == "ACTUATION_ACCEPTED":
+                # Advance device sequence registry only after successful actuation/acceptance
+                db_layer.advance_device_sequence(cmd["device_id"], ack_payload.get("sequence", 0))
+                
             return True
         return False
 
     def confirm_execution(self, device_id: str, pump_active: bool, last_cmd_id: Optional[str] = None):
-        """Confirms actual physical relay state change from inbound telemetry."""
-        target_cmd_id = last_cmd_id
-        if not target_cmd_id:
-            # Find latest published command for this device
-            for cid in reversed(list(_commands_db.keys())):
-                c = _commands_db[cid]
-                if c["device_id"] == device_id and c["status"] in ("published", "acknowledged"):
-                    target_cmd_id = cid
-                    break
-
-        if target_cmd_id and target_cmd_id in _commands_db:
-            cmd = _commands_db[target_cmd_id]
-            expected_active = cmd["command_type"] == "PUMP_ON"
-            if pump_active == expected_active:
-                cmd["status"] = "executed"
-                cmd["executed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                try:
-                    notification_service.create_notification(
-                        notification_type=NotificationType.PUMP_COMMAND_EXECUTED.value,
-                        title="Pump Command Executed",
-                        message=f"Actuator command {cmd['command_type']} confirmed active on {device_id}.",
-                        severity="INFO",
-                        device_id=device_id,
-                        source_event_id=f"exec_{target_cmd_id}",
-                        metadata={"command_id": target_cmd_id}
-                    )
-                except Exception:
-                    pass
+        """Deprecated: Handled strictly by cryptographically signed ACKs now."""
+        pass
 
     def get_command(self, command_id: str) -> Optional[Dict[str, Any]]:
         """Returns single command by ID."""
-        return _commands_db.get(command_id)
+        return db_layer.get_command(command_id)
 
     def get_history(self, device_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         """Returns list of recent commands sorted newest first."""
-        cmds = list(_commands_db.values())
-        if device_id:
-            cmds = [c for c in cmds if c["device_id"] == device_id]
-        return sorted(cmds, key=lambda x: x.get("created_at", ""), reverse=True)[:limit]
+        return db_layer.get_commands_history(device_id, limit)
 
     def get_actuator_state(self, device_id: str = "ESP32_NODE_01") -> Dict[str, Any]:
-        """Returns comprehensive actuator state breakdown adhering to the 12-state safety machine."""
+        """Returns comprehensive actuator state breakdown adhering to safety machine."""
         history = self.get_history(device_id=device_id, limit=1)
         latest_cmd = history[0] if history else None
 
@@ -214,16 +261,16 @@ class PumpCommandController:
         command_state = latest_cmd.get("status", "UNKNOWN").upper() if latest_cmd else "UNKNOWN"
         
         # Check if latest command is expired (published > 15 min ago with no execution confirmation)
-        if latest_cmd and latest_cmd.get("status") in ("published", "acknowledged"):
+        if latest_cmd and latest_cmd.get("status") == "published":
             try:
                 pub_time = datetime.fromisoformat(latest_cmd["created_at"].replace("Z", "+00:00"))
                 if (datetime.now(timezone.utc) - pub_time).total_seconds() > 900:
                     command_state = "EXPIRED"
-                    latest_cmd["status"] = "expired"
+                    db_layer.update_command_status(latest_cmd["command_id"], {"status": "expired"})
             except Exception:
                 pass
 
-        reported_state = "ON" if latest_cmd and latest_cmd.get("status") == "executed" and desired_state == "PUMP_ON" else "OFF"
+        reported_state = "ON" if latest_cmd and latest_cmd.get("status") == "ACTUATION_ACCEPTED" and desired_state == "PUMP_ON" else "OFF"
 
         is_locked_out, lockout_reason = RainLockoutDecision.evaluate(
             active_rain=False,
@@ -245,16 +292,7 @@ class PumpCommandController:
             "lockout_reason": lockout_reason if is_locked_out else None,
             "flow_rate_l_min": None,
             "flow_rate_display": "Not measured",
-            "provenance": "LIVE_SENSOR" if latest_cmd and latest_cmd.get("status") == "executed" else "RULE_BASED"
+            "provenance": "LIVE_SENSOR" if latest_cmd and latest_cmd.get("status") == "ACTUATION_ACCEPTED" else "RULE_BASED"
         }
 
-    def _log_audit(self, event_type: str, device_id: str, details: Dict[str, Any]):
-        self._audit_log.append({
-            "event_type": event_type,
-            "device_id": device_id,
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "details": details
-        })
-
 pump_controller = PumpCommandController()
-

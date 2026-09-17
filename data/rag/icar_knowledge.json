@@ -1,0 +1,130 @@
+[
+    {
+        "meta": {
+            "doc_id": "icar-rice-irr-001",
+            "title": "ICAR Package of Practices for Rice Water & Irrigation Management",
+            "organization": "ICAR - Indian Institute of Rice Research (IIRR)",
+            "url": "https://www.icar-iirr.org/advisories/water_management.pdf",
+            "section": "Water Management & Alternate Wetting and Drying",
+            "page": 4,
+            "crop": "Rice",
+            "topic": "irrigation",
+            "language": "en",
+            "publication_year": 2025,
+            "growth_stage": "Vegetative"
+        },
+        "content": "During the vegetative stage of rice, maintain shallow standing water of 2 to 3 cm. The Alternate Wetting and Drying (AWD) technique allows the field to dry out for 2-3 days after ponded water disappears before re-irrigating to 5 cm depth. AWD saves up to 30% of irrigation water without reducing grain yield. Discontinue all irrigation 10 to 15 days prior to harvest to promote uniform ripening and facilitate mechanical harvesting. During flowering stage, moisture stress must be strictly avoided."
+    },
+    {
+        "meta": {
+            "doc_id": "icar-rice-dis-002",
+            "title": "ICAR Integrated Disease Management Guidelines in Paddy",
+            "organization": "ICAR - National Rice Research Institute (NRRI)",
+            "url": "https://icar-nrri.in/disease_guidelines.pdf",
+            "section": "Fungal & Bacterial Foliar Pathologies",
+            "page": 12,
+            "crop": "Rice",
+            "topic": "disease",
+            "language": "en",
+            "publication_year": 2025,
+            "growth_stage": null
+        },
+        "content": "Rice Brown Spot (Bipolaris oryzae) symptoms appear as circular to oval dark reddish-brown lesions with grey centers. For control, apply foliar spray of Mancozeb (2 g/L) or Carbendazim + Mancozeb companion (2 g/L of water). Bio-control with Trichoderma viride seed treatment (10 g/kg) and foliar spray (5 g/L) provides sustainable resistance. Avoid excessive top-dressing of Nitrogen fertilizer in overcast or high humidity conditions as it exacerbates blast and brown spot."
+    },
+    {
+        "meta": {
+            "doc_id": "imd-rain-lockout-003",
+            "title": "IMD Agromet Advisory: Weather Safety Rules and Rain Lockout Protocol",
+            "organization": "India Meteorological Department (IMD)",
+            "url": "https://mausam.imd.gov.in/agromet/bulletin.pdf",
+            "section": "Operational Weather Safety Protocols",
+            "page": 2,
+            "crop": "General",
+            "topic": "irrigation",
+            "language": "en",
+            "publication_year": 2026,
+            "growth_stage": null
+        },
+        "content": "When cumulative rainfall exceeding 15 mm is forecast within 24 to 48 hours with greater than 60% probability, farmers must enforce a strict irrigation lockout. Applying artificial irrigation before heavy precipitation causes waterlogging, root asphyxiation, fertilizer leaching, and wasted pumping energy. Soil moisture telemetry should be monitored continuously after rain events before restarting drip or furrow pumps."
+    },
+    {
+        "meta": {
+            "doc_id": "fao-56-etc-004",
+            "title": "FAO-56 Irrigation and Drainage Paper: Crop Evapotranspiration Guidelines",
+            "organization": "Food and Agriculture Organization of the United Nations (FAO)",
+            "url": "https://www.fao.org/land-water/databases-and-software/cropwat/en/",
+            "section": "Penman-Monteith ETc Calculation and Soil Water Balance",
+            "page": 45,
+            "crop": "General",
+            "topic": "irrigation",
+            "language": "en",
+            "publication_year": 2024,
+            "growth_stage": null
+        },
+        "content": "Crop water demand ETc is calculated as reference evapotranspiration ET0 multiplied by the crop coefficient Kc. For vegetative stage rice, Kc is 1.15; for mid-season it reaches 1.20; pre-harvest late season falls to 0.90. Readily available water (RAW) represents the soil water fraction that crops extract without experiencing moisture stress. Depletion below 50% of Total Available Water (TAW) triggers mandatory irrigation intervention."
+    },
+    {
+        "meta": {
+            "doc_id": "icar-soil-npk-005",
+            "title": "ICAR Soil Health and Site-Specific Nutrient Management",
+            "organization": "Indian Institute of Soil Science (IISS - ICAR)",
+            "url": "https://iiss.icar.gov.in/extension/soil_health.pdf",
+            "section": "Balanced NPK Ratio & Soil pH Management",
+            "page": 8,
+            "crop": "General",
+            "topic": "fertilizer",
+            "language": "en",
+            "publication_year": 2025,
+            "growth_stage": null
+        },
+        "content": "Optimal soil pH for most cereal and cash crops ranges between 6.0 and 7.5. In acidic soils (pH < 5.5), apply agricultural lime or dolomite at 200-400 kg/acre to restore nutrient availability. Nitrogen (N) promotes vegetative tillering, Phosphorus (P) accelerates root development and early vigor, while Potassium (K) enhances drought tolerance and pest resistance. Split nitrogen application into basal, tillering, and panicle initiation stages to reduce volatilization and leaching losses."
+    },
+    {
+        "meta": {
+            "doc_id": "icar-rice-hi-006",
+            "title": "आईसीएआर धान फसल जल प्रबंधन और कीट नियंत्रण निर्देशिका",
+            "organization": "भारतीय कृषि अनुसंधान परिषद (ICAR)",
+            "url": "https://icar.org.in/hi/crop_advisories/rice.pdf",
+            "section": "धान जल एवं कीट प्रबंधन",
+            "page": 5,
+            "crop": "धान (Rice)",
+            "topic": "irrigation",
+            "language": "hi",
+            "publication_year": 2025,
+            "growth_stage": null
+        },
+        "content": "धान की फसल में वानस्पतिक वृद्धि के समय खेत में 2 से 3 सेमी पानी की हल्की परत बनाए रखें। वैकल्पिक गीला और सूखा (AWD) तकनीक अपनाने से 25 से 30 प्रतिशत पानी की बचत होती है। कटाई से 12-15 दिन पहले सिंचाई पूर्ण रूप से बंद कर दें। यदि पत्तों पर भूरे धब्बे (ब्राउन स्पॉट) दिखें तो मैंकोजेब 2 ग्राम प्रति लीटर पानी में मिलाकर छिड़काव करें। भारी वर्षा के पूर्वानुमान के समय अतिरिक्त सिंचाई तुरंत रोक दें।"
+    },
+    {
+        "meta": {
+            "doc_id": "icar-rice-te-007",
+            "title": "వరి సాగు నీటి యాజమాన్యం మరియు ఎరువుల సిఫార్సులు (ICAR - IIRR)",
+            "organization": "భారతీయ వ్యవసాయ పరిశోధన మండలి (ICAR) & PJTSAU",
+            "url": "https://www.icar-iirr.org/telugu_advisory.pdf",
+            "section": "వరి నీటి పారుదల మరియు పోషకాలు",
+            "page": 3,
+            "crop": "వరి (Rice)",
+            "topic": "irrigation",
+            "language": "te",
+            "publication_year": 2025,
+            "growth_stage": null
+        },
+        "content": "వరి పైరు ఎదుగుదల దశలో 2-3 సెం.మీ మేర పలుచని నీటి మట్టం సరిపోతుంది. ఆల్టర్నేట్ వెట్టింగ్ అండ్ డ్రైయింగ్ (AWD / తడి-ఆరి పద్ధతి) పాటించడం ద్వారా 30% వరకు నీటి ఆదా చేయవచ్చు. కోతకు 10-15 రోజుల ముందు నీటి తడులు పూర్తిగా ఆపివేయాలి. భారీ వర్ష సూచన ఉన్నప్పుడు పంపు మోటార్లను నిలిపివేసి అధిక వర్షపు నీరు బయటకు పోయేలా డ్రైనేజీ ఏర్పాటు చేయాలి. నత్రజని ఎరువులను ఒకేసారి కాకుండా 3 దఫాలుగా వేయాలి."
+    },
+    {
+        "meta": {
+            "doc_id": "icar-cotton-te-008",
+            "title": "పత్తి పంటలో సమగ్ర పురుగుల యాజమాన్యం",
+            "organization": "PJTSAU / ICAR-CICR",
+            "url": "https://cicr.icar.gov.in/telugu_cotton_protection.pdf",
+            "section": "పత్తి పురుగుల యాజమాన్యం",
+            "page": 7,
+            "crop": "పత్తి (Cotton)",
+            "topic": "pest_control",
+            "language": "te",
+            "publication_year": 2025,
+            "growth_stage": null
+        },
+        "content": "పత్తి పంటలో గులాబీ రంగు కాయ తొలుచు పురుగు నివారణకు ఎకరానికి 4 లింగాకర్షక బుట్టలు (Pheromone traps) అమర్చాలి. ఆకుమచ్చ తెగులు లేదా రసం పీల్చు పురుగులైన తెల్లదోమ, పేనుబంక నివారణకు వేపనూనె 5 మి.లీ లేదా ఎసిటామిప్రిడ్ 0.2 గ్రాము లీటరు నీటికి కలిపి పిచికారీ చేయాలి. తేమ ఎక్కువగా ఉన్నప్పుడు నత్రజని వాడకం తగ్గించాలి."
+    }
+]

@@ -14,8 +14,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
-      - key: ENFORCE_JWT_AUTH
-        value: "false"
       - key: OLLAMA_BASE_URL
         value: ""          # Empty on Render — Ollama is NOT available on free tier
       - key: GROQ_API_KEY

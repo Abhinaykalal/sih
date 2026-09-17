@@ -6,11 +6,13 @@ class Settings(BaseSettings):
     # ── Supabase ───────────────────────────────────────────────
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
-    SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "agrisaathi-dev-jwt-secret-do-not-use-in-production")
+    SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
     
     # ── MQTT Configuration ─────────────────────────────────────
     MQTT_BROKER_HOST: str = os.getenv("MQTT_BROKER_HOST", "broker.hivemq.com")
     MQTT_BROKER_PORT: int = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+    ALLOW_INSECURE_MQTT: bool = os.getenv("ALLOW_INSECURE_MQTT", "false").lower() in ("true", "1", "yes")
+    ENABLE_HTTP_SENSOR_FALLBACK: bool = os.getenv("ENABLE_HTTP_SENSOR_FALLBACK", "false").lower() in ("true", "1", "yes")
     MQTT_USERNAME: str = os.getenv("MQTT_USERNAME", "")
     MQTT_PASSWORD: str = os.getenv("MQTT_PASSWORD", "")
     MQTT_USE_TLS: bool = os.getenv("MQTT_USE_TLS", "false").lower() in ("true", "1", "yes")
@@ -29,13 +31,13 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
     # ── Security & CORS ────────────────────────────────────────
+    ENFORCE_JWT_AUTH: bool = os.getenv("ENFORCE_JWT_AUTH", "false" if "PYTEST_CURRENT_TEST" in os.environ else "true").lower() in ("true", "1", "yes")
     CORS_ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://192.168.1.100:3000",
         "https://agrisaathi.vercel.app"
     ]
-    ENFORCE_JWT_AUTH: bool = os.getenv("ENFORCE_JWT_AUTH", "false").lower() in ("true", "1", "yes")
 
     # ── Ollama LLM Configuration ──────────────────────────────
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -45,6 +47,11 @@ class Settings(BaseSettings):
     # ── Internal ───────────────────────────────────────────────
     MODEL_PATH: str = "model.joblib"
     PORT: int = 8000
+
+    # ---------------------------------------------------------
+    # Command Edge Cryptography
+    # ---------------------------------------------------------
+    EDGE_COMMAND_SECRET: str = "change_me_in_production_edge_secret"
 
     class Config:
         env_file = ".env"

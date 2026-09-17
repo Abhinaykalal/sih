@@ -1,67 +1,28 @@
-import React, { useState } from 'react';
+﻿import React from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { theme } from '../styles/theme';
-import { ApiClient } from '../services/ApiClient';
+
 import { ProvenanceBadge } from '../components/ProvenanceBadge';
 
 const CROPS = ['Rice', 'Wheat', 'Tomato', 'Cotton', 'Potato'];
 type VisionResult = { status?: string; diagnosis?: string | null; confidence_pct?: number | null; action?: string; reason?: string; provenance?: string; model_name?: string; model_version?: string | null; warning?: string; quality?: Record<string, number> };
 
+import { useVisionDiagnostics } from '../hooks/useVisionDiagnostics';
+
 export function VisionScreen() {
-  const [selectedCrop, setSelectedCrop] = useState('Rice');
-  const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<VisionResult | null>(null);
-
-  const chooseFromLibrary = async () => {
-    setResult(null);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return Alert.alert('Photo access required', 'Allow photo access to select a crop leaf image.');
-    const picked = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.9,
-      base64: true,
-    });
-    if (!picked.canceled && picked.assets[0]?.base64) {
-      setImageUri(picked.assets[0].uri);
-      setImageBase64(picked.assets[0].base64);
-    }
-  };
-
-  const takePhoto = async () => {
-    setResult(null);
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) return Alert.alert('Camera access required', 'Allow camera access to photograph a crop leaf.');
-    const captured = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.9,
-      base64: true,
-    });
-    if (!captured.canceled && captured.assets[0]?.base64) {
-      setImageUri(captured.assets[0].uri);
-      setImageBase64(captured.assets[0].base64);
-    }
-  };
-
-  const reset = () => { setImageUri(null); setImageBase64(null); setResult(null); setLoading(false); };
-
-  const handleDiagnose = async () => {
-    if (!imageBase64) return Alert.alert('No image selected', 'Take a photo or upload a clear crop leaf image first.');
-    setLoading(true);
-    setResult(null);
-    try {
-      const res = await ApiClient.vision.diagnoseLeafImage(imageBase64, selectedCrop, 'Vegetative');
-      setResult(res || { status: 'NO_RELIABLE_RESULT', diagnosis: null, confidence_pct: null, action: 'No result was returned by the vision service.' });
-    } catch (error: any) {
-      setResult({ status: 'NETWORK_OR_SERVER_ERROR', diagnosis: null, confidence_pct: null, action: 'The image could not be analyzed. Check the backend connection and try again.', reason: error?.message || 'Vision request failed.' });
-    } finally { setLoading(false); }
-  };
+  const {
+    selectedCrop,
+    setSelectedCrop,
+    imageUri,
+    imageBase64,
+    loading,
+    result,
+    chooseFromLibrary,
+    takePhoto,
+    reset,
+    handleDiagnose,
+  } = useVisionDiagnostics();
 
   const predictionAvailable = result?.status === 'EXPERIMENTAL_PREDICTION' && !!result.diagnosis;
 
@@ -80,20 +41,20 @@ export function VisionScreen() {
       </ScrollView>
 
       <View style={styles.scannerCard}>
-        {imageUri ? <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="cover" /> : <View style={styles.placeholder}><Text style={{ fontSize: 44 }}>🍃</Text><Text style={styles.scannerPrompt}>Select or photograph one crop leaf</Text><Text style={styles.scannerTip}>Use good lighting and keep the leaf in focus</Text></View>}
+        {imageUri ? <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="cover" /> : <View style={styles.placeholder}><Text style={{ fontSize: 44 }}>ðŸƒ</Text><Text style={styles.scannerPrompt}>Select or photograph one crop leaf</Text><Text style={styles.scannerTip}>Use good lighting and keep the leaf in focus</Text></View>}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={takePhoto} disabled={loading}><Text style={styles.secondaryBtnText}>📷 Take Photo</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={chooseFromLibrary} disabled={loading}><Text style={styles.secondaryBtnText}>🖼️ Upload Image</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={takePhoto} disabled={loading}><Text style={styles.secondaryBtnText}>ðŸ“· Take Photo</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={chooseFromLibrary} disabled={loading}><Text style={styles.secondaryBtnText}>ðŸ–¼ï¸ Upload Image</Text></TouchableOpacity>
           <TouchableOpacity style={styles.resetBtn} onPress={reset} disabled={loading}><Text style={styles.resetBtnText}>Reset</Text></TouchableOpacity>
         </View>
         <TouchableOpacity style={[styles.primaryScanBtn, (!imageBase64 || loading) && styles.primaryScanBtnDisabled]} onPress={handleDiagnose} disabled={loading || !imageBase64}>
-          {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryScanBtnText}>🔬 Analyze Actual Leaf Photo</Text>}
+          {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryScanBtnText}>ðŸ”¬ Analyze Actual Leaf Photo</Text>}
         </TouchableOpacity>
       </View>
 
       {result && <View style={[styles.resultCard, !predictionAvailable && styles.resultCardWarning]}>
         <View style={styles.resultHeader}>
-          <View style={styles.diseaseIconBadge}><Text style={{ fontSize: 24 }}>{predictionAvailable ? '🔬' : '⚠️'}</Text></View>
+          <View style={styles.diseaseIconBadge}><Text style={{ fontSize: 24 }}>{predictionAvailable ? 'ðŸ”¬' : 'âš ï¸'}</Text></View>
           <View style={{ flex: 1, marginLeft: 12 }}><Text style={[styles.diagnosisTag, !predictionAvailable && { color: theme.colors.warning }]}>VISION STATUS</Text><Text style={styles.diseaseName}>{predictionAvailable ? result.diagnosis : formatStatus(result.status)}</Text>{!!result.reason && <Text style={styles.pathogenName}>{result.reason}</Text>}</View>
           <ProvenanceBadge source={result.provenance || (predictionAvailable ? 'EXPERIMENTAL' : 'UNAVAILABLE')} size="small" />
         </View>
@@ -120,3 +81,4 @@ const styles = StyleSheet.create({
   resultCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E2E8F0' }, resultCardWarning: { borderColor: '#FCD34D' }, resultHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 }, diseaseIconBadge: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FEE2E2', alignItems: 'center', justifyContent: 'center' }, diagnosisTag: { fontSize: 10, fontWeight: '800', color: '#DC2626', letterSpacing: 0.5 }, diseaseName: { fontSize: 16, fontWeight: '800', color: theme.colors.textPrimary }, pathogenName: { fontSize: 11, color: '#64748B', marginTop: 3 },
   metricsRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#F8FAFC', borderRadius: 8, padding: 8, marginBottom: 12 }, metricBox: { flex: 1, alignItems: 'center' }, metricBoxLabel: { fontSize: 10, color: '#64748B', marginBottom: 2, textAlign: 'center' }, metricBoxVal: { fontSize: 12, fontWeight: '700', color: theme.colors.textPrimary, textAlign: 'center' }, divider: { height: 1, backgroundColor: '#E2E8F0', marginBottom: 12 }, treatmentSection: { marginBottom: 12 }, treatmentTitle: { fontSize: 12, fontWeight: '700', color: theme.colors.textPrimary, marginBottom: 4 }, treatmentBody: { fontSize: 12, color: '#475569', lineHeight: 18 }, warningText: { fontSize: 11, color: '#92400E', lineHeight: 16, marginTop: 8 },
 });
+
