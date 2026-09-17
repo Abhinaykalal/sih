@@ -220,5 +220,7 @@ class NutrientDeficiencyModelProvider:
         return result
 
 
+# Kept only as an explicit unavailable compatibility symbol for legacy imports.
+vision_provider = None
 irrigation_provider = IrrigationModelProvider()
 nutrient_provider = NutrientDeficiencyModelProvider()
