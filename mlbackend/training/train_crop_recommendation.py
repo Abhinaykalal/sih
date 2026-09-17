@@ -42,6 +42,7 @@ def run(retrain: bool = False):
         X_train = df_train[['N', 'P', 'K', 'temperature', 'humidity', 'ph', 'rainfall']]
         y_train = df_train['label']
         model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
         joblib.dump(model, os.path.join(MODELS_DIR, "crop_recommendation_rf.joblib"), compress=3)
         joblib.dump(model, MODEL_PATH, compress=3)
     else:
