@@ -1382,10 +1382,7 @@ def get_offline_status():
 # ============================================================
 # MODULE 15: CUSTOM HYBRID DATABASE ENGINE (BUILT FROM SCRATCH)
 # ============================================================
-try:
-    from .notification_engine import custom_notifier
-except ImportError:
-    from notification_engine import custom_notifier
+from .notification_engine import custom_notifier
 
 
 @app.get("/api/hybrid-db/stats")

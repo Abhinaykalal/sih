@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Copy application code
 COPY mlbackend ./mlbackend
 COPY models ./models
+COPY data ./data
 COPY datasets/manifests ./datasets/manifests
 COPY datasets/splits ./datasets/splits
 COPY datasets/test_fixtures ./datasets/test_fixtures
