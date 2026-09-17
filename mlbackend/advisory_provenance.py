@@ -282,7 +282,8 @@ def render_advisory_text(
     air_temp_item = field_status.get("air_temperature_c")
     if air_temp_item and air_temp_item.value is not None:
         prov_label = "Simulated" if air_temp_item.provenance == DataProvenance.SIMULATED.value else "Live sensor"
-        lines.append(f"- Air temperature: {air_temp_item.value}{air_temp_item.unit or '\u00b0C'} [{prov_label}]")
+        unit = air_temp_item.unit or '\u00b0C'
+        lines.append(f"- Air temperature: {air_temp_item.value}{unit} [{prov_label}]")
     else:
         lines.append("- Air temperature: Not available [Unavailable]")
 
