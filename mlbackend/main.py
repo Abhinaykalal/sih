@@ -181,6 +181,14 @@ except ImportError:
         class RotationInput(BaseModel): lang: str = "en"
         def recommend_rotation(x): return {"error": "Module offline"}
 
+# Vision AI (Leaf Disease)
+try:
+    from .vision_ai_model import local_vision_ai
+except ImportError:
+    try:
+        from vision_ai_model import local_vision_ai
+    except ImportError:
+        local_vision_ai = None
 
 try:
     from .notification_service import NotificationPayload, FarmerContact, dispatch_alert, send_telegram_message
@@ -332,6 +340,41 @@ def update_ollama_config(payload: OllamaTunnelConfig):
         "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
+
+
+# ============================================================
+# LEAF AI — Vision Disease Diagnosis
+# POST /api/vision-diagnose
+# Accepts base64-encoded leaf image, returns HOG/SVM diagnosis.
+# ============================================================
+
+class VisionDiagnoseRequest(BaseModel):
+    image_base64: str
+    crop_type: Optional[str] = None
+    growth_stage: Optional[str] = None
+
+@app.post("/api/vision-diagnose")
+def vision_diagnose(payload: VisionDiagnoseRequest):
+    """Diagnose leaf disease from a base64-encoded crop leaf image."""
+    if local_vision_ai is None:
+        raise HTTPException(status_code=503, detail="Vision model service unavailable.")
+    if not payload.image_base64 or len(payload.image_base64) < 100:
+        raise HTTPException(status_code=400, detail="No valid image_base64 provided.")
+    try:
+        # Strip data URI prefix if present (data:image/jpeg;base64,...)
+        b64 = payload.image_base64
+        if "," in b64:
+            b64 = b64.split(",", 1)[1]
+        import base64 as _b64
+        image_bytes = _b64.b64decode(b64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 image data: {exc}")
+    result = local_vision_ai.diagnose(image_bytes=image_bytes)
+    # Attach metadata
+    result["crop_type"] = payload.crop_type
+    result["growth_stage"] = payload.growth_stage
+    result["diagnosed_at"] = datetime.now(timezone.utc).isoformat()
+    return result
 
 @app.get("/version")
 def version_info():
