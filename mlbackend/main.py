@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, File, UploadFile, De
 from fastapi.middleware.cors import CORSMiddleware
 import base64
 import time
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timezone
 import requests
