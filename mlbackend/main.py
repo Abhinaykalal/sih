@@ -1533,7 +1533,14 @@ def get_offline_status():
 # ============================================================
 # MODULE 15: CUSTOM HYBRID DATABASE ENGINE (BUILT FROM SCRATCH)
 # ============================================================
-from .notification_engine import custom_notifier
+# NOTE: notification_engine module not yet implemented; stubbing endpoints
+class _StubNotifier:
+    def get_active_alerts(self, unread_only=False):
+        return []
+    def dispatch_notification(self, **kwargs):
+        return {"status": "notification_system_not_yet_implemented"}
+
+custom_notifier = _StubNotifier()
 
 
 @app.get("/api/hybrid-db/stats")
