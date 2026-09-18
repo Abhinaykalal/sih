@@ -1,6 +1,6 @@
 {
   "model_name": "AgriSaathi Crop Recommendation Engine",
-  "version": "1.2.0-Production",
+  "version": "76db1ccd-bf9b-402b-af68-b73baf8c16d2",
   "architecture": "RandomForestClassifier(n_estimators=100)",
   "dataset_name": "Precision Agriculture Crop Recommendation Dataset",
   "dataset_version": "1.0",
@@ -40,11 +40,11 @@
     "ph",
     "rainfall"
   ],
-  "training_date": "2026-09-16T07:34:49.193279+00:00",
+  "training_date": "2026-09-18T09:36:22.566225+00:00",
   "model_status": "REAL_VERIFIED",
   "field_validation_required": false,
   "known_limitations": [
-    "Assumes water availability when recommending high-water crops (e.g., paddy rice, sugarcane)",
+    "Assumes water availability when recommending high-water crops",
     "Does not factor in dynamic daily agricultural commodity spot market prices"
   ]
 }
