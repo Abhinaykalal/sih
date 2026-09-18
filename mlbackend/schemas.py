@@ -27,8 +27,8 @@ from pydantic import BaseModel, Field
 class DataQualityStatus(str, Enum):
     """Freshness and reliability status of telemetry data."""
     LIVE = "LIVE"  # ≤10 minutes old (real-time)
-    STALE = "STALE"  # >10 min but ≤6 hours old (caution: may not reflect current state)
-    OFFLINE = "OFFLINE"  # >6 hours old (device unreachable)
+    STALE = "STALE"  # >10 min but ≤60 min old (caution: may not reflect current state)
+    OFFLINE = "OFFLINE"  # >60 min old (device unreachable)
     UNAVAILABLE = "UNAVAILABLE"  # No data received yet
 
 
@@ -174,8 +174,8 @@ class DeviceState(str, Enum):
     """Device lifecycle states computed from telemetry age."""
     REGISTERED = "REGISTERED"  # Device created in system, no telemetry received yet
     ONLINE = "ONLINE"  # Telemetry ≤10 minutes old (actively communicating)
-    STALE = "STALE"  # Telemetry >10 min, ≤6 hours old (may have disconnected)
-    OFFLINE = "OFFLINE"  # Telemetry >6 hours old (device unreachable)
+    STALE = "STALE"  # Telemetry >10 min, ≤60 min old (may have disconnected)
+    OFFLINE = "OFFLINE"  # Telemetry >60 min old (device unreachable)
     ERROR = "ERROR"  # Device error state (reported by device)
 
 

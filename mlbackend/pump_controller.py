@@ -63,7 +63,31 @@ class RainLockoutDecision:
         return False, "Atmospheric conditions dry. Safe to irrigate."
 
 class PumpCommandController:
-    """Controls and audits all actuator dispatch operations."""
+    """
+    PHASE 3.1 REMEDIATION (Sept 18, 2026): UNIFIED IRRIGATION DECISION PATH
+    
+    This is the ONLY authorized decision path for irrigation commands.
+    Edge device (ESP32) is NO LONGER autonomous—all pump activation requires backend approval.
+    
+    Decision flow:
+    1. Verify rain lockout (active rain or forecast ≥50% blocks activation)
+    2. Sign command with HMAC-SHA256
+    3. Publish to MQTT (ESP32 subscribes)
+    4. Wait for ACK from edge device
+    5. Audit log with actor_id (who requested)
+    
+    Hardware safety (still runs on ESP32):
+    - Waterlogging interlock (moisture >80%)
+    - Hardware-level relay fail-safe (always starts OFF)
+    - Replay protection (sequence numbers)
+    
+    This ensures:
+    - Single decision authority (backend only)
+    - Rain forecast integration
+    - Irrigation schedule enforcement
+    - Multi-device arbitration
+    - Full audit trail
+    """
 
     def dispatch(self, req: PumpCommandRequest, actor_id: Optional[str] = None) -> Dict[str, Any]:
         """Validates, checks rain lockout, and executes actuator commands with cryptography."""

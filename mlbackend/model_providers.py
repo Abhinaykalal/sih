@@ -99,7 +99,7 @@ class IrrigationModelProvider:
             )
 
         # Check sensor freshness
-        is_stale = last_updated_seconds_ago > 21600 # > 6 hours old
+        is_stale = last_updated_seconds_ago > 3600 # > 60 minutes old (Phase 3.1 remediation: reduced from 6 hours)
         if is_stale:
             inputs_missing.append("fresh_soil_moisture")
             return IrrigationAssessmentResult(
@@ -112,7 +112,7 @@ class IrrigationModelProvider:
                     EvidenceItem(type="sensor", name="last_seen", value=f"{last_updated_seconds_ago // 3600} hours ago", unit="hours")
                 ],
                 provenance="UNAVAILABLE",
-                explanation="Sensor moisture reading is stale (> 6 hours old). Fresh telemetry is required for verified irrigation decisions.",
+                explanation="Sensor moisture reading is stale (> 60 minutes old). Fresh telemetry is required for verified irrigation decisions.",
                 inputs_used=["soil_moisture"],
                 inputs_missing=inputs_missing
             )

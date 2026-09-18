@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     TELEMETRY_LIVE_THRESHOLD_SECONDS: int = int(os.getenv("TELEMETRY_LIVE_THRESHOLD_SECONDS", "600"))  # 10 minutes
     
     # STALE: Data > LIVE but ≤ TELEMETRY_STALE_THRESHOLD_SECONDS (device may have disconnected)
-    TELEMETRY_STALE_THRESHOLD_SECONDS: int = int(os.getenv("TELEMETRY_STALE_THRESHOLD_SECONDS", "21600"))  # 6 hours
+    TELEMETRY_STALE_THRESHOLD_SECONDS: int = int(os.getenv("TELEMETRY_STALE_THRESHOLD_SECONDS", "3600"))  # 60 minutes (reduced from 6 hours)
     
     # OFFLINE: Data > STALE (device unreachable)
     # (no threshold needed — anything older than STALE is OFFLINE)

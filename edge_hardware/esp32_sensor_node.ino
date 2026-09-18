@@ -270,14 +270,18 @@ void loop() {
 
     EdgeRuleResult res = EdgeRuleEngine::evaluateRisk(z2_moisture, airTemp, humidity);
     
-    // Actuate Relays autonomously if safe
-    if (String(res.action) == "ACTIVATE_PUMP_ZONE_2_IMMEDIATELY") {
-      if (currentMoisture >= 0 && currentMoisture <= MOISTURE_LOCKOUT_THRESHOLD) {
-        digitalWrite(PUMP_RELAY_PIN, HIGH);
-      }
-    } else if (String(res.action) == "DEACTIVATE_PUMP_DRAIN_SOIL") {
-      digitalWrite(PUMP_RELAY_PIN, LOW);
-    }
+    // PHASE 3.1 REMEDIATION (Sept 18, 2026):
+    // Removed autonomous relay actuation. All pump commands must be authorized by backend.
+    // Edge device now uses local rule engine ONLY for edge-side risk assessment,
+    // but final pump command must come through backend via signed MQTT command.
+    // This ensures:
+    // - Rain forecast integration (backend checks weather API)
+    // - Irrigation schedule enforcement
+    // - Multi-device arbitration
+    // - Audit trail of decisions
+    //
+    // The edge_rule_engine output is still valuable for offline diagnostics,
+    // but is NOT used for actuation without backend approval.
     
     // Build JSON Payload
     StaticJsonDocument<512> doc;

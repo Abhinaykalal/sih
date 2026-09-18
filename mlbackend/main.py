@@ -122,15 +122,20 @@ except ImportError:
 try:
     from .pump_controller import pump_controller, PumpCommandRequest
     from .db_layer import db_layer
+    from .cloud_sync_worker import cloud_sync_worker, start_cloud_sync_on_startup, stop_cloud_sync_on_shutdown
     from .auth import get_current_user, get_optional_user, UserPrincipal
 except ImportError:
     try:
         from pump_controller import pump_controller, PumpCommandRequest
         from db_layer import db_layer
+        from cloud_sync_worker import cloud_sync_worker, start_cloud_sync_on_startup, stop_cloud_sync_on_shutdown
         from auth import get_current_user, get_optional_user, UserPrincipal
     except ImportError:
         pump_controller = None
         PumpCommandRequest = None
+        cloud_sync_worker = None
+        start_cloud_sync_on_startup = None
+        stop_cloud_sync_on_shutdown = None
         db_layer = None
         async def get_current_user(): return None
         async def get_optional_user(): return None
@@ -237,6 +242,26 @@ else:
     print("Notice: Running in 100% offline local mode (Supabase optional cloud sync not configured).")
 
 app = FastAPI(title="Agrisaathi AI - Core Intelligence Engine v2.0")
+
+# ============================================================================
+# PHASE 3.1: CLOUD SYNC WORKER STARTUP/SHUTDOWN
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize cloud sync worker on server startup."""
+    logger.info("Server startup: initializing cloud sync worker")
+    if start_cloud_sync_on_startup:
+        await start_cloud_sync_on_startup()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Gracefully stop cloud sync worker on server shutdown."""
+    logger.info("Server shutdown: stopping cloud sync worker")
+    if stop_cloud_sync_on_shutdown:
+        stop_cloud_sync_on_shutdown()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -1662,6 +1687,54 @@ def get_notification_sync_status():
         "current_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     }
 
+@app.get("/api/cloud-sync/status")
+@app.get("/cloud-sync/status")
+def get_cloud_sync_status():
+    """
+    PHASE 3.1: Returns cloud synchronization status.
+    
+    Monitors background worker progress uploading telemetry to Supabase.
+    Provides honest status: pending records, successful uploads, failed attempts.
+    """
+    if not cloud_sync_worker:
+        return {
+            "status": "disabled",
+            "enabled": False,
+            "pending_records": 0,
+            "message": "Cloud sync worker not available",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    try:
+        pending = cloud_sync_worker.get_pending_records(limit=10)
+        pending_count = len(cloud_sync_worker.get_pending_records(limit=100000))  # Get full count
+        
+        return {
+            "status": "active" if cloud_sync_worker.is_running else "stopped",
+            "enabled": cloud_sync_worker.enabled,
+            "is_running": cloud_sync_worker.is_running,
+            "pending_records": pending_count,
+            "recent_pending": [
+                {
+                    "id": r["id"],
+                    "client_action_id": r["client_action_id"],
+                    "record_class": r["record_class"],
+                    "created_at": r["created_at"],
+                    "sync_attempts": r["sync_attempts"]
+                }
+                for r in pending
+            ],
+            "message": f"{pending_count} records pending cloud upload" if pending_count > 0 else "All records synced to cloud",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error checking cloud sync status: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
 @app.get("/alerts")
 @app.get("/api/alerts")
 def get_alerts_list(unread_only: bool = Query(False), limit: int = Query(50, ge=1, le=100)):
@@ -1735,34 +1808,32 @@ def get_zones_metadata(farm_id: Optional[str] = None):
 @app.get("/devices")
 @app.get("/api/devices")
 def get_devices_metadata():
-    """Returns connected edge IoT and robotics devices."""
-    return {
-        "status": "success",
-        "devices": [
-            {
-                "device_id": "ESP32_NODE_01",
-                "farm_id": "farm-green-valley",
-                "zone_id": "zone-1-north-field",
-                "device_type": "SOIL_WEATHER_NODE",
-                "status": "ONLINE",
-                "battery_pct": 94,
-                "signal_rssi_dbm": -62,
-                "firmware_version": "v2.4.1",
-                "last_seen": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            },
-            {
-                "device_id": "QUALCOMM_EDGE_GW_01",
-                "farm_id": "farm-green-valley",
-                "zone_id": "zone-1-north-field",
-                "device_type": "QUALCOMM_ROBOTICS_RB5",
-                "status": "ONLINE",
-                "battery_pct": 100,
-                "signal_rssi_dbm": -48,
-                "firmware_version": "v1.2.0-snpe",
-                "last_seen": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            }
-        ]
-    }
+    """
+    Returns connected edge IoT and robotics devices.
+    
+    PHASE 3.1 REMEDIATION (Sept 18, 2026):
+    Removed hardcoded mock device state (battery_pct: 94, signal_rssi_dbm: -62).
+    Device state is now computed from real telemetry via /api/telemetry/latest.
+    
+    For actual device registry, use db_layer.list_all_devices() after implementing
+    real device provisioning flow. Currently returns empty list to prevent
+    fabrication of synthetic device status.
+    """
+    try:
+        # Future: Fetch real devices from db_layer
+        # devices = db_layer.list_all_devices()
+        # For now, return empty list (no fabricated data)
+        return {
+            "status": "success",
+            "devices": [],
+            "note": "Device registry not yet implemented. Use /api/telemetry/latest for real device state."
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "devices": []
+        }
 
 @app.get("/telemetry")
 @app.get("/api/telemetry")
@@ -1924,10 +1995,24 @@ async def dispatch_pump_command_api(
     user: UserPrincipal = Depends(get_current_user)
 ):
     """
-    Dispatches actuator command (PUMP_ON, PUMP_OFF, MISTER_ON, MISTER_OFF).
-    Enforces strict Rain Lockout: blocks activation when rain is active or forecast threshold exceeded.
-    Tracks command lifecycle: requested -> published -> acknowledged -> executed.
-    Authentication required — unauthenticated requests are rejected with 401.
+    PHASE 3.1 REMEDIATION (Sept 18, 2026): UNIFIED IRRIGATION DECISION PATH
+    
+    This is the ONLY authorized path for ALL pump/irrigation commands.
+    - Edge device (ESP32) is NO LONGER autonomous (removed local heuristic actuation)
+    - Backend verification REQUIRED for all pump activation
+    - Rain forecast integration enforced via RainLockoutDecision
+    - All decisions audit-logged with actor_id
+    
+    Commands: PUMP_ON, PUMP_OFF, MISTER_ON, MISTER_OFF
+    
+    Security guarantees:
+    1. Rain Lockout: blocks activation when rain active or forecast ≥50%
+    2. Authentication: user must be logged in (401 if not)
+    3. Cryptography: HMAC-SHA256 signed to ESP32, replay protection via sequence numbers
+    4. Audit trail: all commands logged with timestamp, actor_id, status
+    5. Hardware interlock: ESP32 checks moisture >80% (waterlogging)
+    
+    Status flow: requested → published → acknowledged → executed
     """
     if not pump_controller:
         raise HTTPException(status_code=503, detail="Pump Controller offline")
