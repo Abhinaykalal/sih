@@ -6,14 +6,14 @@ import { webApi, SensorMetrics } from '@/lib/webApiClient';
 
 export const IoTDashboardModule: React.FC = () => {
   const [metrics, setMetrics] = useState<SensorMetrics>({
-    soil_moisture: 38.4,
-    temperature: 27.6,
-    humidity: 62.0,
-    light: 8400,
-    rain: 0,
-    npk: { n: 42, p: 28, k: 34 },
+    soil_moisture: null,
+    temperature: null,
+    humidity: null,
+    light: null,
+    rain: null,
+    npk: { n: null, p: null, k: null },
     pump_active: false,
-    status: 'connecting',
+    status: 'loading',
   });
 
   const [loading, setLoading] = useState(false);
@@ -37,8 +37,8 @@ export const IoTDashboardModule: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const isMoistureLow = metrics.soil_moisture < 30;
-  const isHeatHigh = metrics.temperature > 35;
+  const isMoistureLow = metrics.soil_moisture !== null && metrics.soil_moisture < 30;
+  const isHeatHigh = metrics.temperature !== null && metrics.temperature > 35;
 
   return (
     <div className="space-y-6">
@@ -99,11 +99,11 @@ export const IoTDashboardModule: React.FC = () => {
               <Droplets className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white">{metrics.soil_moisture}%</div>
+          <div className="text-2xl font-black text-white">{metrics.soil_moisture !== null ? `${metrics.soil_moisture}%` : '—'}</div>
           <div className="mt-2 flex items-center gap-1.5 text-[11px]">
-            <span className={`w-2 h-2 rounded-full ${isMoistureLow ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-            <span className={isMoistureLow ? 'text-amber-400' : 'text-emerald-400'}>
-              {isMoistureLow ? 'Dry - Needs Irrigation' : 'Optimal Field Capacity'}
+            <span className={`w-2 h-2 rounded-full ${metrics.soil_moisture !== null && metrics.soil_moisture < 30 ? 'bg-amber-400' : metrics.soil_moisture !== null ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+            <span className={metrics.soil_moisture !== null && metrics.soil_moisture < 30 ? 'text-amber-400' : metrics.soil_moisture !== null ? 'text-emerald-400' : 'text-gray-400'}>
+              {metrics.soil_moisture !== null ? (metrics.soil_moisture < 30 ? 'Dry - Needs Irrigation' : 'Optimal Field Capacity') : 'Waiting for sensor data'}
             </span>
           </div>
         </div>
@@ -116,11 +116,11 @@ export const IoTDashboardModule: React.FC = () => {
               <Thermometer className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white">{metrics.temperature}°C</div>
+          <div className="text-2xl font-black text-white">{metrics.temperature !== null ? `${metrics.temperature}°C` : '—'}</div>
           <div className="mt-2 flex items-center gap-1.5 text-[11px]">
-            <span className={`w-2 h-2 rounded-full ${isHeatHigh ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-            <span className={isHeatHigh ? 'text-amber-400' : 'text-gray-400'}>
-              {isHeatHigh ? 'Heat Stress Warning' : 'Normal Range'}
+            <span className={`w-2 h-2 rounded-full ${metrics.temperature !== null && metrics.temperature > 35 ? 'bg-amber-400' : metrics.temperature !== null ? 'bg-emerald-400' : 'bg-gray-600'}`} />
+            <span className={metrics.temperature !== null && metrics.temperature > 35 ? 'text-amber-400' : metrics.temperature !== null ? 'text-gray-400' : 'text-gray-400'}>
+              {metrics.temperature !== null ? (metrics.temperature > 35 ? 'Heat Stress Warning' : 'Normal Range') : 'Waiting for sensor data'}
             </span>
           </div>
         </div>
@@ -133,10 +133,10 @@ export const IoTDashboardModule: React.FC = () => {
               <Droplets className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white">{metrics.humidity}%</div>
+          <div className="text-2xl font-black text-white">{metrics.humidity !== null ? `${metrics.humidity}%` : '—'}</div>
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-blue-400" />
-            <span>DHT22 Precision Sensor</span>
+            <span className={`w-2 h-2 rounded-full ${metrics.humidity !== null ? 'bg-blue-400' : 'bg-gray-600'}`} />
+            <span>{metrics.humidity !== null ? 'DHT22 Precision Sensor' : 'Waiting for sensor data'}</span>
           </div>
         </div>
 
@@ -148,10 +148,10 @@ export const IoTDashboardModule: React.FC = () => {
               <Sun className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-white">{metrics.light || 8400} Lux</div>
+          <div className="text-2xl font-black text-white">{metrics.light !== null ? `${metrics.light} Lux` : '—'}</div>
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-yellow-400" />
-            <span>LDR Photodiode Array</span>
+            <span className={`w-2 h-2 rounded-full ${metrics.light !== null ? 'bg-yellow-400' : 'bg-gray-600'}`} />
+            <span>{metrics.light !== null ? 'LDR Photodiode Array' : 'No sensor'}</span>
           </div>
         </div>
 
@@ -168,30 +168,30 @@ export const IoTDashboardModule: React.FC = () => {
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-gray-300">Nitrogen (N)</span>
-                <span className="text-emerald-400 font-bold">{metrics.npk?.n || 42} mg/kg</span>
+                <span className="text-emerald-400 font-bold">{metrics.npk?.n !== null ? `${metrics.npk?.n} mg/kg` : '—'}</span>
               </div>
               <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
-                <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(100, ((metrics.npk?.n || 42) / 80) * 100)}%` }} />
+                <div className="bg-emerald-500 h-full rounded-full" style={{ width: metrics.npk?.n !== null ? `${Math.min(100, ((metrics.npk?.n || 0) / 80) * 100)}%` : '0%' }} />
               </div>
             </div>
 
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-gray-300">Phosphorus (P)</span>
-                <span className="text-blue-400 font-bold">{metrics.npk?.p || 28} mg/kg</span>
+                <span className="text-blue-400 font-bold">{metrics.npk?.p !== null ? `${metrics.npk?.p} mg/kg` : '—'}</span>
               </div>
               <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
-                <div className="bg-blue-500 h-full rounded-full" style={{ width: `${Math.min(100, ((metrics.npk?.p || 28) / 50) * 100)}%` }} />
+                <div className="bg-blue-500 h-full rounded-full" style={{ width: metrics.npk?.p !== null ? `${Math.min(100, ((metrics.npk?.p || 0) / 50) * 100)}%` : '0%' }} />
               </div>
             </div>
 
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-gray-300">Potassium (K)</span>
-                <span className="text-amber-400 font-bold">{metrics.npk?.k || 34} mg/kg</span>
+                <span className="text-amber-400 font-bold">{metrics.npk?.k !== null ? `${metrics.npk?.k} mg/kg` : '—'}</span>
               </div>
               <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
-                <div className="bg-amber-500 h-full rounded-full" style={{ width: `${Math.min(100, ((metrics.npk?.k || 34) / 60) * 100)}%` }} />
+                <div className="bg-amber-500 h-full rounded-full" style={{ width: metrics.npk?.k !== null ? `${Math.min(100, ((metrics.npk?.k || 0) / 60) * 100)}%` : '0%' }} />
               </div>
             </div>
           </div>

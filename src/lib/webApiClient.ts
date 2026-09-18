@@ -241,6 +241,7 @@ export const webApi = {
       }
     }
 
+    // Phase 1: If backend is unavailable, return null values (never synthetic defaults)
     return {
       soil_moisture: null,
       temperature: null,

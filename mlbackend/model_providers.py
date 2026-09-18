@@ -220,25 +220,41 @@ class IrrigationModelProvider:
 
 # 3. Nutrient Deficiency Model Provider
 class NutrientDeficiencyModelProvider:
-    """Separates Visual Symptoms from Measured Soil NPK Data."""
+    """Separates Visual Symptoms from Measured Soil NPK Data.
+    
+    IMPORTANT: Phase 1 - Real Runtime Data Only
+    - Does NOT inject synthetic NPK defaults into responses
+    - Only reports values actually received from hardware
+    - Does NOT use fallback defaults (45/22/38) for missing MQTT fields
+    - Marks assessment as UNCONFIRMED_VISUAL_ONLY if sensors unavailable
+    """
     
     def evaluate(self, visual_symptoms: Optional[str], npk_measured: Optional[Dict[str, float]]) -> Dict[str, Any]:
-        has_sensor_npk = npk_measured is not None and "N" in npk_measured
+        # Phase 1: Only process if sensor data actually present and non-None
+        has_sensor_npk = (npk_measured is not None and 
+                         "N" in npk_measured and 
+                         npk_measured.get("N") is not None)
         
-        n_val = npk_measured.get("N", 45) if has_sensor_npk else None
-        p_val = npk_measured.get("P", 22) if has_sensor_npk else None
-        k_val = npk_measured.get("K", 38) if has_sensor_npk else None
+        # ✓ PHASE 1: NO synthetic defaults
+        # If field missing or None, preserve as None (do NOT use 45/22/38 fallback)
+        n_val = npk_measured.get("N") if has_sensor_npk else None
+        p_val = npk_measured.get("P") if has_sensor_npk else None
+        k_val = npk_measured.get("K") if has_sensor_npk else None
 
         visual_findings = visual_symptoms or "Mild leaf tip yellowing"
         
-        status = "CONSISTENT" if has_sensor_npk and n_val < 35 else "UNCONFIRMED_VISUAL_ONLY"
+        status = "CONSISTENT" if has_sensor_npk and n_val is not None and n_val < 35 else "UNCONFIRMED_VISUAL_ONLY"
+        
+        # Only include measured_npk if sensor data is real and complete
+        measured_npk_val = npk_measured if has_sensor_npk else None
         
         return {
             "status": status,
             "visual_symptoms": visual_findings,
-            "measured_npk": npk_measured if has_sensor_npk else "No live soil NPK sensor connected",
-            "assessment": f"Visual observation suggests possible Nitrogen deficiency. {'Soil sensor reading confirms low Nitrogen (' + str(n_val) + ' ppm).' if has_sensor_npk else 'Conduct a soil test to confirm exact NPK requirement.'}",
-            "confidence": 0.91 if has_sensor_npk else 0.70
+            "measured_npk": measured_npk_val,
+            "assessment": f"Visual observation suggests possible Nitrogen deficiency. {'Soil sensor reading confirms low Nitrogen (' + str(n_val) + ' ppm).' if has_sensor_npk and n_val is not None else 'No soil NPK sensor data available. Conduct a soil test to confirm exact NPK requirement.'}",
+            "confidence": 0.91 if (has_sensor_npk and n_val is not None) else 0.70,
+            "sensor_data_quality": "REAL_MEASUREMENT" if has_sensor_npk else "NO_SENSOR_DATA"
         }
 
 # Instantiate Singleton Providers
