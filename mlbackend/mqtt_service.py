@@ -21,9 +21,11 @@ import threading
 try:
     from .config import settings
     from .db_layer import db_layer
+    from .schemas import TelemetryDataQuality, DataQualityStatus
 except ImportError:
     from config import settings
     from db_layer import db_layer
+    from schemas import TelemetryDataQuality, DataQualityStatus
 
 def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]) -> Tuple[bool, Optional[Dict[str, Any]], List[str]]:
     """
@@ -199,6 +201,47 @@ def parse_and_validate_telemetry_payload(raw_payload: Union[str, Dict[str, Any]]
     }
 
     return True, cleaned_record, errors
+
+
+def compute_data_quality_status(received_at_timestamp: float) -> Dict[str, Any]:
+    """
+    Computes data quality status (LIVE/STALE/OFFLINE) based on age.
+    
+    Args:
+        received_at_timestamp: Unix timestamp when backend received the packet
+        
+    Returns:
+        Dict with status, age_seconds, and reason
+    """
+    now_ts = time.time()
+    age_seconds = now_ts - received_at_timestamp
+    
+    # Import settings for thresholds
+    try:
+        from .config import settings
+    except ImportError:
+        from config import settings
+    
+    live_threshold = settings.TELEMETRY_LIVE_THRESHOLD_SECONDS  # 600 seconds (10 min)
+    stale_threshold = settings.TELEMETRY_STALE_THRESHOLD_SECONDS  # 21600 seconds (6 hours)
+    
+    if age_seconds <= live_threshold:
+        status = DataQualityStatus.LIVE
+        reason = f"Data fresh ({int(age_seconds)} seconds old)"
+    elif age_seconds <= stale_threshold:
+        status = DataQualityStatus.STALE
+        hours = int(age_seconds / 3600)
+        reason = f"Data stale (received {hours} hours ago)"
+    else:
+        status = DataQualityStatus.OFFLINE
+        days = int(age_seconds / 86400)
+        reason = f"Device offline (last telemetry {days} days ago)"
+    
+    return {
+        "status": status,
+        "age_seconds": age_seconds,
+        "reason": reason
+    }
 
 
 class MQTTServiceManager:

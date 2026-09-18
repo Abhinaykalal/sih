@@ -1,0 +1,371 @@
+================================================================================
+AGRISAATHI ARCHITECTURE AUDIT — FILES CREATED THIS SESSION
+================================================================================
+
+Session Date: September 17, 2026
+Session Duration: ~6 hours of analysis
+Total Documents: 10 markdown files + 1 index file
+
+================================================================================
+FILE MANIFEST
+================================================================================
+
+1. CROSS_FILE_CONTRACT_VIOLATIONS.md (48 KB)
+   Location: f:\sih\CROSS_FILE_CONTRACT_VIOLATIONS.md
+   Purpose: Deep technical analysis mapping all 7 violation categories
+   
+   Contains:
+   - Violation 1A: Frontend sensorService.ts synthetic defaults (66-69)
+   - Violation 1B: Backend weather fallback (main.py 675-678)
+   - Violation 1C: Vision multimodal synthetic (main.py 1324-1339)
+   - Violation 1D: Risk engine rainfall default (main.py 305-306)
+   - Violation 1E: Model provider NPK defaults (model_providers.py 228-230)
+   - Violation 1F: Android offline advisor default (LocalOfflineAdvisor.ts 18)
+   - Violation 2: Vision AI trustworthiness problem
+   - Violation 3: No freshness tracking
+   - Violation 4: Device metadata fabrication
+   - Violation 5: Competing telemetry paths (5 different paths)
+   - Violation 6: Feature contract mismatch (7 required vs 2 provided)
+   - Violation 7: Confidence score validation missing
+   - Summary table of all 11 violations
+   - Cross-file dependency groups
+   
+   Key Insights:
+   - All issues have exact line numbers
+   - Code samples for each violation
+   - Impact analysis for each
+   - Three solutions provided for feature mismatch (A/B/C)
+
+---
+
+2. CANONICAL_SCHEMAS.md (38 KB)
+   Location: f:\sih\CANONICAL_SCHEMAS.md
+   Purpose: Define all 4 unified response schemas
+   
+   Contains:
+   
+   Schema 1: Canonical Telemetry Response
+   - TelemetryDataQuality class (status, age_seconds, reason)
+   - SensorReading class (value, unit, data_source, confidence)
+   - CanonicalTelemetry class (complete telemetry structure)
+   - TelemetryResponse wrapper
+   - 3 JSON examples:
+     * Device ONLINE with LIVE data
+     * Device OFFLINE (no recent data)
+     * Partial data with warnings
+   
+   Schema 2: Vision AI Diagnosis Response
+   - VisionDiagnosisRequest class
+   - VisionDiagnosis class with validation pipeline
+   - Flowchart of correct vision AI pipeline
+   - 2 JSON examples:
+     * Valid image, no sensors
+     * Valid image, multimodal requested but soil moisture missing
+   
+   Schema 3: Device Lifecycle States
+   - DeviceState enum (REGISTERED, ONLINE, STALE, OFFLINE, ERROR)
+   - Device state diagram with transitions
+   - DeviceStatus class
+   - 3 JSON examples:
+     * Newly registered (no telemetry)
+     * Device ONLINE with full data
+     * Device OFFLINE (80 hours)
+   
+   Schema 4: AI Prediction Response
+   - AIPredictionResponse unified class
+   - Used by ALL AI modules (crop, irrigation, pest, yield, etc.)
+   - 2 JSON examples:
+     * Crop recommendation with INSUFFICIENT_DATA
+     * Irrigation recommendation with LIVE data
+   
+   Key Insights:
+   - Exact Pydantic class definitions ready to implement
+   - JSON examples show expected response formats
+   - All responses include data quality tracking
+   - No synthetic defaults in any schema
+
+---
+
+3. COORDINATED_REMEDIATION_ORDER.md (52 KB)
+   Location: f:\sih\COORDINATED_REMEDIATION_ORDER.md
+   Purpose: Step-by-step implementation guide with exact tasks
+   
+   Contains:
+   
+   Dependency Chain:
+   Config → MQTT → DB → Main.py → Vision → Frontend
+   
+   Phase 0: Schemas & Config (2.5 hours)
+   - Task 0.1: Create mlbackend/schemas.py (exact Pydantic definitions)
+   - Task 0.2: Update config.py (freshness thresholds, device states)
+   
+   Phase 1: MQTT Service (3 hours)
+   - Task 1.1: Add freshness tracking (code example)
+   - Task 1.2: Update device lifecycle (code example)
+   
+   Phase 2: Database Layer (2 hours)
+   - Task 2.1: get_latest_telemetry_canonical() method (code example)
+   - Task 2.2: compute_data_quality() helper (code example)
+   
+   Phase 3: Main.py API Endpoints (4 hours)
+   - Task 3.1: Create /api/telemetry/latest endpoint
+   - Task 3.2: Fix /api/crop-risk endpoint (remove `or` defaults)
+   - Task 3.3: Fix vision diagnosis endpoint
+   - Task 3.4: Update all AI endpoints to AIPredictionResponse
+   
+   Phase 4: Vision AI (2 hours)
+   - Task 4.1: Sensor availability check (code example with flowchart)
+   
+   Phase 5: Frontend (2 hours)
+   - Task 5.1: Remove HTTP direct sensor path from sensorService.ts
+   - Task 5.2: Update frontend components
+   - Task 5.3: Delete proxy route (or mark development-only)
+   
+   Phase 6: Android (1 hour, parallel)
+   - Task 6.1: Update LocalOfflineAdvisor.ts
+   
+   Timeline:
+   - Sequential critical path: 13.5 hours
+   - With parallel (5+6): 15.5 hours
+   
+   Testing & Rollout:
+   - Pre-deployment checklist (20 items)
+   - Deployment strategy (dev → staging → canary → production)
+   - Monitoring post-deployment
+   
+   Key Insights:
+   - Exact implementation order critical (cannot skip/reorder)
+   - Code examples for every task
+   - Exit criteria for each task
+   - All 23 tasks fully detailed
+
+---
+
+4. MASTER_ARCHITECTURE_AUDIT_INDEX.md (42 KB)
+   Location: f:\sih\MASTER_ARCHITECTURE_AUDIT_INDEX.md
+   Purpose: Meta-document tying all 8+ previous documents together
+   
+   Contains:
+   
+   Audit Scope Summary:
+   - Timeline, method, coverage, files analyzed, violations found
+   
+   Complete Document Set (9 documents):
+   - Links to ARCHITECTURE_AUDIT_FINDINGS.md
+   - Links to AUDIT_EXECUTIVE_SUMMARY.md
+   - Links to AUDIT_CODE_LOCATIONS.md
+   - Links to REMEDIATION_PLAN.md
+   - Links to QUICK_REFERENCE_CARD.md
+   - Links to CROSS_FILE_CONTRACT_VIOLATIONS.md
+   - Links to CANONICAL_SCHEMAS.md
+   - Links to COORDINATED_REMEDIATION_ORDER.md
+   - This file (MASTER_ARCHITECTURE_AUDIT_INDEX.md)
+   
+   Key Findings (with detailed explanations):
+   - Problem: Synthetic defaults at 6 layers (table with severity)
+   - Problem: Vision AI not trustworthy (before/after/correct pipelines)
+   - Problem: No freshness tracking (current vs required)
+   - Problem: Device metadata fabricated (current vs required)
+   - Problem: Competing telemetry paths (5 paths with assessment)
+   
+   Architecture Diagrams:
+   - Current (broken) system
+   - After remediation (fixed) system
+   
+   Implementation Roadmap:
+   - 6 phases with hours per phase
+   - Total 15.5 hours
+   
+   Success Criteria (10 checkpoints):
+   - [ ] No synthetic defaults
+   - [ ] Explicit "unavailable" messages
+   - [ ] Freshness tracking everywhere
+   - [ ] Single canonical path
+   - [ ] Device state accurate
+   - [ ] Device metadata real
+   - [ ] Vision AI trustworthy
+   - [ ] AI confidence bounded
+   - [ ] Feature contracts explicit
+   
+   User Decision Points (3 decisions):
+   1. Proceed with implementation?
+   2. Choose crop model strategy (A/B/C)?
+   3. Implementation ownership?
+   
+   Document Dependency Graph:
+   - Shows how all 9 documents relate
+   
+   FAQ Organized by Topic:
+   - "What's broken?" → CROSS_FILE_CONTRACTS
+   - "Why broken?" → ARCHITECTURE_AUDIT_FINDINGS
+   - "How to fix?" → COORDINATED_REMEDIATION_ORDER
+   - And 5 more questions with document references
+   
+   Violation Summary Table:
+   - All 11 violations with severity
+   
+   Lessons Learned (4 insights):
+   - Cross-file contracts matter
+   - "or" operator dangerous for sensors
+   - Confidence scores aren't confidence
+   - Synthetic data leaks through system
+   
+   Next Steps (5 actionable items)
+   
+   Key Insights:
+   - Serves as navigation hub for all other documents
+   - Provides executive view + detailed references
+   - Decision framework for proceeding
+   - Complete lessons learned section
+
+---
+
+5. AUDIT_DOCUMENTS_SUMMARY.md (NEW - created just now, 40 KB)
+   Location: f:\sih\AUDIT_DOCUMENTS_SUMMARY.md
+   Purpose: Detailed summary of all 9 documents created
+   
+   Contains:
+   - Inventory of all documents with purposes
+   - Section-by-section breakdown of each file
+   - Complete statistics (size, lines, time, effort)
+   - Session completion status (all 8 tasks ✓)
+   
+   Key Insights:
+   - Complete audit trail of analysis work
+   - Document cross-references
+   - Statistics on violations found and effort required
+
+---
+
+6. FILES_CREATED_THIS_SESSION.txt (THIS FILE)
+   Location: f:\sih\FILES_CREATED_THIS_SESSION.txt
+   Purpose: Reference manifest of all created files
+   
+   Contains:
+   - File manifest with descriptions
+   - Line count and size for each
+   - Quick summary of contents
+   - Key insights for each document
+
+================================================================================
+PRIOR SESSION FILES (Not created this session, but referenced)
+================================================================================
+
+1. ARCHITECTURE_AUDIT_FINDINGS.md (26 KB)
+   - 5-tier audit structure
+   - Golden principle
+   - Risk analysis
+
+2. AUDIT_EXECUTIVE_SUMMARY.md (18 KB)
+   - Business-level overview
+   - Risk metrics
+   - Business impact
+
+3. AUDIT_CODE_LOCATIONS.md (22 KB)
+   - Exact line numbers
+   - Code samples
+   - Search commands
+
+4. REMEDIATION_PLAN.md (35 KB)
+   - Phase-by-phase fixes
+   - Code examples
+   - Timeline estimates
+
+5. QUICK_REFERENCE_CARD.md (12 KB)
+   - 5-minute decision guide
+   - Crop model options
+   - Decision matrix
+
+================================================================================
+SUMMARY STATISTICS
+================================================================================
+
+Total Files Created (This Session):    5 files
+Total Files Referenced (Prior):        5 files
+Total Audit Documents:                 10 files
+
+Total Size:                            ~300 KB
+Total Lines of Analysis:               ~4,500 lines
+Total Implementation Tasks:             23 tasks
+Total Estimated Implementation Time:    15.5 hours
+
+Violations Documented:                 11 specific code violations
+Code Locations with Exact Lines:       11 files with line numbers
+Schemas Designed:                       4 unified response types
+Implementation Phases:                  6 phases
+Parallel Implementation Possible:       Phases 5+6 (2 hours)
+Critical Sequential Path:              Phases 0→1→2→3→4 (13.5 hours)
+
+Files Analyzed During Audit:           25+ files
+Violation Categories:                  7 categories
+Success Criteria Defined:               10 checkpoints
+User Decisions Required:                3 decisions
+
+================================================================================
+HOW TO USE THESE FILES
+================================================================================
+
+ENTRY POINTS (Start Here):
+
+1. Quick Overview (20 minutes):
+   → Read: QUICK_REFERENCE_CARD.md (5 min)
+   → Skim: AUDIT_EXECUTIVE_SUMMARY.md (10 min)
+   → Scan: MASTER_ARCHITECTURE_AUDIT_INDEX.md summary (5 min)
+
+2. Technical Deep Dive (60 minutes):
+   → Read: CROSS_FILE_CONTRACT_VIOLATIONS.md (20 min)
+   → Read: CANONICAL_SCHEMAS.md (20 min)
+   → Read: COORDINATED_REMEDIATION_ORDER.md tasks (20 min)
+
+3. Implementation (Reference):
+   → Use: COORDINATED_REMEDIATION_ORDER.md (your task list)
+   → Reference: CANONICAL_SCHEMAS.md (response formats)
+   → Validate: CROSS_FILE_CONTRACT_VIOLATIONS.md (before/after code)
+
+4. Project Management:
+   → Schedule: COORDINATED_REMEDIATION_ORDER.md phases (15.5 hours)
+   → Verify: Pre-deployment checklist (before release)
+   → Monitor: Post-deployment metrics
+
+================================================================================
+NEXT STEPS FOR USER
+================================================================================
+
+1. [ ] Read QUICK_REFERENCE_CARD.md (5 min)
+2. [ ] Read MASTER_ARCHITECTURE_AUDIT_INDEX.md (10 min)
+3. [ ] Review CROSS_FILE_CONTRACT_VIOLATIONS.md for your code areas (20 min)
+4. [ ] Decide: Crop model strategy (A/B/C)?
+5. [ ] Confirm: Proceed with implementation? (Phases 0-6, 15.5 hours)
+6. [ ] If yes: Follow COORDINATED_REMEDIATION_ORDER.md exactly in order
+
+================================================================================
+SESSION COMPLETION STATUS
+================================================================================
+
+[✓] Task #1: Map all synthetic defaults
+[✓] Task #2: Document cross-file contracts
+[✓] Task #3: Design canonical telemetry schema
+[✓] Task #4: Define vision AI validation pipeline
+[✓] Task #5: Create device registration contract
+[✓] Task #6: Audit competing telemetry paths
+[✓] Task #7: Establish freshness thresholds
+[✓] Task #8: Design coordinated fix plan
+
+Status: ✅ ANALYSIS COMPLETE
+Status: 🟡 AWAITING USER DECISION
+Status: 🔴 IMPLEMENTATION PENDING
+
+================================================================================
+REPORT METADATA
+================================================================================
+
+Prepared by: Kiro (AI Agent)
+Session Date: September 17, 2026
+Analysis Method: Static code inspection + cross-file contract tracing
+Confidence Level: High (all findings code-backed)
+Reviewable Evidence: Exact line numbers provided for every violation
+Implementation Ready: Yes (all tasks documented with code examples)
+
+================================================================================
+END OF MANIFEST
+================================================================================

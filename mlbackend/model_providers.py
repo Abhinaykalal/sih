@@ -21,7 +21,7 @@ class EvidenceItem(BaseModel):
 class ModelConfidence(BaseModel):
     overall: float
     level: str # "high" | "moderate" | "low" | "uncertain"
-    calibration_method: str = "Platt_Scaling_Validation"
+    calibration_method: str = "RULE_BASED_THRESHOLD"  # Hardcoded thresholds, not Platt scaling
 
 class VisionInferenceResult(BaseModel):
     is_valid_crop_image: bool

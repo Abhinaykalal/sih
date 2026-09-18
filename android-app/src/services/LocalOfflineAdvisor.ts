@@ -14,8 +14,11 @@ export class LocalOfflineAdvisor {
   ): Promise<OfflineAdvisoryResult> {
     const q = query.toLowerCase();
     const cachedSensors = await OfflineStore.getCachedSensorTelemetry();
+    
+    // ✓ PHASE 6 FIX: Remove synthetic defaults
+    // Do NOT use ?? 28 fallback — preserve null if sensor data unavailable
     const soilMoisture = cachedSensors?.data?.soil_moisture ?? cachedSensors?.data?.soil_moisture_pct ?? null;
-    const temp = cachedSensors?.data?.temperature ?? cachedSensors?.data?.temperature_c ?? 28;
+    const temp = cachedSensors?.data?.temperature ?? cachedSensors?.data?.temperature_c ?? null;  // Now null, not 28
 
     let adviceEn = '';
     let adviceHi = '';

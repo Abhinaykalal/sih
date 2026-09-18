@@ -242,14 +242,15 @@ export const webApi = {
     }
 
     return {
-      soil_moisture: 38.4,
-      temperature: 27.6,
-      humidity: 62.0,
-      light: 8400,
-      rain: 0,
-      npk: { n: 42, p: 28, k: 34 },
-      pump_active: false,
-      status: 'offline_cache',
+      soil_moisture: null,
+      temperature: null,
+      humidity: null,
+      light: null,
+      rain: null,
+      npk: null,
+      pump_active: null,
+      status: 'OFFLINE_NO_DATA',
+      offline_default: true,
       timestamp: new Date().toISOString(),
     };
   },

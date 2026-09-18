@@ -49,12 +49,43 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # ---------------------------------------------------------
+    # Data Freshness Thresholds (Architecture Remediation Phase 0)
+    # ---------------------------------------------------------
+    # LIVE: Data ≤ TELEMETRY_LIVE_THRESHOLD_SECONDS (actively communicating device)
+    TELEMETRY_LIVE_THRESHOLD_SECONDS: int = int(os.getenv("TELEMETRY_LIVE_THRESHOLD_SECONDS", "600"))  # 10 minutes
+    
+    # STALE: Data > LIVE but ≤ TELEMETRY_STALE_THRESHOLD_SECONDS (device may have disconnected)
+    TELEMETRY_STALE_THRESHOLD_SECONDS: int = int(os.getenv("TELEMETRY_STALE_THRESHOLD_SECONDS", "21600"))  # 6 hours
+    
+    # OFFLINE: Data > STALE (device unreachable)
+    # (no threshold needed — anything older than STALE is OFFLINE)
+    
+    # Device State Auto-Computation (based on telemetry age)
+    # REGISTERED: Device created, no telemetry received yet
+    # ONLINE: Telemetry ≤ TELEMETRY_LIVE_THRESHOLD_SECONDS
+    # STALE: Telemetry > LIVE but ≤ TELEMETRY_STALE_THRESHOLD_SECONDS
+    # OFFLINE: Telemetry > TELEMETRY_STALE_THRESHOLD_SECONDS
+    # ERROR: Device reported error state
+
+    # ---------------------------------------------------------
     # Command Edge Cryptography
     # ---------------------------------------------------------
-    EDGE_COMMAND_SECRET: str = "change_me_in_production_edge_secret"
+    EDGE_COMMAND_SECRET: str = os.getenv("EDGE_COMMAND_SECRET", "change_me_in_production_edge_secret")
 
     class Config:
         env_file = ".env"
         extra = "allow"
 
+_DEFAULT_SECRET = "change_me_in_production_edge_secret"
+
 settings = Settings()
+
+# Fail fast if production is running with the default HMAC key.
+# This key is publicly known (it's in source), so any command signed with it
+# can be forged by anyone who has read this file.
+_env = os.getenv("ENVIRONMENT", "").lower()
+if _env == "production" and settings.EDGE_COMMAND_SECRET == _DEFAULT_SECRET:
+    raise RuntimeError(
+        "[SECURITY] EDGE_COMMAND_SECRET is set to the default value in a production environment. "
+        "Set a strong random secret via the EDGE_COMMAND_SECRET environment variable before starting."
+    )

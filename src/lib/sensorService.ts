@@ -1,33 +1,44 @@
 /**
- * AGRISENTINEL - ESP32 SENSOR GATEWAY SERVICE
- * -------------------------------------------------------------
- * Step 1: Network-resilient gateway service sitting between ESP32 and UI.
- * Handles timeouts (AbortController 3s), backoff retries, capability flags,
- * DHT integrity verification, and local caching.
+ * AGRISENTINEL - CANONICAL SENSOR GATEWAY SERVICE (Phase 5 Remediation)
+ * 
+ * ✓ FIXED: Remove HTTP direct path to ESP32 (/sensors endpoint)
+ * ✓ FIXED: Remove synthetic defaults (soil_moisture ?? 40, temperature ?? 28, etc.)
+ * ✓ FIXED: Use only canonical /api/telemetry/latest from backend
+ * 
+ * Key principle: REAL DATA OR DATA_UNAVAILABLE, never fabricated values.
+ * 
+ * Single data source: Backend → MQTT → /api/telemetry/latest
+ * No fallback defaults allowed at frontend level.
  */
 
 export interface NpkData {
-  n: number;
-  p: number;
-  k: number;
+  n: number | null;
+  p: number | null;
+  k: number | null;
 }
 
 export interface SensorReading {
   dht_ok: boolean;
-  soil_moisture: number;
-  temperature: number;
-  humidity: number;
-  light: number;
+  soil_moisture: number | null;  // Now nullable — no synthetic default
+  temperature: number | null;    // Now nullable — no synthetic default
+  humidity: number | null;       // Now nullable — no synthetic default
+  light: number | null;          // Now nullable — no synthetic default
   hasNpkSensor: boolean;
   hasRainSensor: boolean;
   npk?: NpkData;
-  rain?: number;
+  rain?: number | null;
   timestamp: number;
   pump_relay?: boolean;
+  data_quality?: {
+    status: "LIVE" | "STALE" | "OFFLINE" | "UNAVAILABLE";
+    age_seconds?: number;
+    reason?: string;
+  };
+  message?: string;
 }
 
 export interface SensorError {
-  code: "TIMEOUT" | "NETWORK_ERROR" | "PARSE_ERROR" | "MALFORMED_DATA";
+  code: "TIMEOUT" | "NETWORK_ERROR" | "PARSE_ERROR" | "MALFORMED_DATA" | "NO_DATA_AVAILABLE";
   message: string;
 }
 
@@ -36,13 +47,19 @@ export type SensorReadingResult =
   | { success: false; error: SensorError };
 
 const CACHE_KEY = "agri_last_sensor_reading";
+const BACKEND_TELEMETRY_URL = "/api/telemetry/latest";  // Canonical endpoint
 
 /**
- * Step 1.1 & 1.4: Fetch sensor data from ESP32 with AbortController (3s) and backoff retry.
+ * Phase 5: Fetch sensor data from CANONICAL BACKEND ONLY
+ * 
+ * ✓ REMOVED: Direct HTTP /sensors endpoint to ESP32 (was main.py issue)
+ * ✓ FIXED: Use only /api/telemetry/latest which enforces real data only
+ * ✓ FIXED: Preserve nulls — do NOT inject synthetic defaults
+ * 
+ * Query: /api/telemetry/latest?device_id=ESP32_NODE_01
  */
-export async function fetchSensorData(ip: string, retries = 2): Promise<SensorReadingResult> {
-  const cleanIp = ip.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const url = `http://${cleanIp}/sensors`;
+export async function fetchSensorData(deviceId: string = "ESP32_NODE_01", retries = 2): Promise<SensorReadingResult> {
+  const url = `${BACKEND_TELEMETRY_URL}?device_id=${deviceId}`;
 
   let attempt = 0;
   const backoffDelays = [500, 1000];
@@ -56,51 +73,72 @@ export async function fetchSensorData(ip: string, retries = 2): Promise<SensorRe
       clearTimeout(timeoutId);
 
       if (!res.ok) {
+        if (res.status === 404) {
+          return {
+            success: false,
+            error: {
+              code: "NO_DATA_AVAILABLE",
+              message: `No telemetry received yet for device ${deviceId}. Device state: REGISTERED.`
+            }
+          };
+        }
         throw new Error(`HTTP ${res.status}`);
       }
 
       const json = await res.json();
-
-      // Step 1.2: Validate data contract
-      const dht_ok = typeof json.dht_ok === "boolean" ? json.dht_ok : (json.temperature !== undefined && json.humidity !== undefined);
-      const soil_moisture = Number(json.soil_moisture ?? json.z2_moisture ?? 40);
-      const temperature = Number(json.temperature ?? json.air_temp ?? 28);
-      const humidity = Number(json.humidity ?? json.z4_humidity ?? 65);
-      const light = Number(json.light ?? 8000);
-
-      // Step 1.3: Capability flags (only set true if hardware payload contains npk/rain)
-      const hasNpkSensor = Boolean(json.npk || (json.npk_n !== undefined && json.npk_p !== undefined));
-      const hasRainSensor = Boolean(json.rain !== undefined || json.rain_val !== undefined);
-
-      let npk: NpkData | undefined = undefined;
-      if (hasNpkSensor) {
-        npk = json.npk || {
-          n: Number(json.npk_n ?? 24),
-          p: Number(json.npk_p ?? 18),
-          k: Number(json.npk_k ?? 30)
+      
+      // Validate canonical response structure
+      if (!json.success || !json.data) {
+        return {
+          success: false,
+          error: {
+            code: "PARSE_ERROR",
+            message: json.message || "Invalid telemetry response structure"
+          }
         };
       }
 
-      let rain: number | undefined = undefined;
-      if (hasRainSensor) {
-        rain = Number(json.rain ?? json.rain_val ?? 0);
+      const canonical = json.data;
+
+      // ✓ FIXED: Preserve null values — do NOT use ?? defaults
+      const soil_moisture = canonical.soil_moisture_pct ?? null;
+      const temperature = canonical.temperature_c ?? null;
+      const humidity = canonical.humidity_pct ?? null;
+      const light = null;  // Not provided by canonical telemetry
+
+      // Capability flags (only if sensors reported real data)
+      const hasNpkSensor = (canonical.nitrogen !== null && canonical.phosphorus !== null && canonical.potassium !== null);
+      const hasRainSensor = false;  // Not in canonical telemetry
+
+      let npk: NpkData | undefined = undefined;
+      if (hasNpkSensor) {
+        npk = {
+          n: canonical.nitrogen,
+          p: canonical.phosphorus,
+          k: canonical.potassium
+        };
       }
 
       const reading: SensorReading = {
-        dht_ok,
-        soil_moisture,
-        temperature,
-        humidity,
-        light,
+        dht_ok: true,  // Assume OK if we got data
+        soil_moisture,      // null if unavailable (no synthetic 40)
+        temperature,        // null if unavailable (no synthetic 28)
+        humidity,           // null if unavailable (no synthetic 65)
+        light,              // null (not available)
         hasNpkSensor,
         hasRainSensor,
         npk,
-        rain,
-        timestamp: Date.now(),
-        pump_relay: Boolean(json.pump_relay)
+        rain: null,
+        timestamp: canonical.age_seconds ? (Date.now() - (canonical.age_seconds * 1000)) : Date.now(),
+        pump_relay: canonical.pump_active ?? undefined,
+        data_quality: canonical.data_quality || {
+          status: "UNAVAILABLE",
+          reason: "Unable to determine freshness"
+        },
+        message: json.message
       };
 
-      // Save to localStorage cache for offline safety (Step 6.2)
+      // Save to localStorage cache for offline safety
       if (typeof window !== "undefined") {
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(reading));
@@ -122,8 +160,8 @@ export async function fetchSensorData(ip: string, retries = 2): Promise<SensorRe
           error: {
             code: isTimeout ? "TIMEOUT" : "NETWORK_ERROR",
             message: isTimeout 
-              ? "ESP32 request timed out after 3000ms" 
-              : (err.message || "Failed to reach ESP32 node")
+              ? "Backend telemetry request timed out after 3000ms" 
+              : (err.message || "Failed to reach backend /api/telemetry/latest")
           }
         };
       }
@@ -138,12 +176,20 @@ export async function fetchSensorData(ip: string, retries = 2): Promise<SensorRe
 
 /**
  * Retrieve cached reading from localStorage when offline.
+ * Cache is stale — shows "OFFLINE" status
  */
 export function getCachedSensorReading(): SensorReading | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(CACHE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as SensorReading;
+    // Mark cache as OFFLINE (old data)
+    if (cached.data_quality) {
+      cached.data_quality.status = "OFFLINE";
+      cached.data_quality.reason = "Using cached data — device may be offline";
+    }
+    return cached;
   } catch {
     return null;
   }

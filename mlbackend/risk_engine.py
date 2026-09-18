@@ -7,7 +7,51 @@ Strictly aligned with SIH Problem Statement Requirements:
 4. Edge AI Offline Store & Sync Architecture
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
+def validate_sensor_availability(required_sensors: List[str], sensor_values: Dict[str, Optional[float]]) -> Dict[str, Any]:
+    """
+    Phase 4: Vision AI Sensor Validation
+    
+    Validates that all required sensors are REAL (not None/synthetic) before multimodal fusion.
+    
+    Args:
+        required_sensors: List of sensor names needed for analysis
+        sensor_values: Dict mapping sensor names to their values (None if unavailable)
+        
+    Returns:
+        Dict with:
+        - all_available: bool (True if all required sensors are real)
+        - available_sensors: list of sensor names with real data
+        - missing_sensors: list of sensor names that are None
+        - data_quality_assessment: str describing why fusion may/may not be reliable
+    """
+    available_sensors = []
+    missing_sensors = []
+    
+    for sensor_name in required_sensors:
+        value = sensor_values.get(sensor_name)
+        if value is not None:
+            available_sensors.append(sensor_name)
+        else:
+            missing_sensors.append(sensor_name)
+    
+    all_available = len(missing_sensors) == 0
+    
+    if all_available:
+        data_quality_assessment = "All required sensors available. Multimodal fusion can proceed with high confidence."
+    elif len(available_sensors) > 0:
+        data_quality_assessment = f"Partial sensor data: {', '.join(available_sensors)} available. Missing: {', '.join(missing_sensors)}. Image-only diagnosis recommended."
+    else:
+        data_quality_assessment = "No sensor data available. Image-only diagnosis will be used."
+    
+    return {
+        "all_available": all_available,
+        "available_sensors": available_sensors,
+        "missing_sensors": missing_sensors,
+        "data_quality_assessment": data_quality_assessment,
+        "recommendation": "MULTIMODAL" if all_available else "IMAGE_ONLY"
+    }
 
 def evaluate_smart_irrigation(soil_moisture: float, air_temp: float, rain_forecast_prob: float) -> Dict[str, Any]:
     """
@@ -50,10 +94,23 @@ def evaluate_smart_irrigation(soil_moisture: float, air_temp: float, rain_foreca
 def evaluate_pest_trend(pest_counts: list) -> Dict[str, Any]:
     """
     PEST OUTBREAK ACCELERATION ENGINE: Detects population velocity before severe crop damage.
+    Requires a list with at least one real observation. Returns a NO_DATA status when called
+    with no counts — callers must not substitute synthetic values.
     """
     if not pest_counts:
-        pest_counts = [4, 7, 13, 25]
-        
+        # No real trap-count data available. Do NOT use synthetic history.
+        return {
+            "latest_pest_count": None,
+            "trend_history": "NO_DATA",
+            "is_accelerating": False,
+            "risk_level": "DATA_UNAVAILABLE",
+            "recommendation": (
+                "No pest trap-count data received. Install sticky-trap sensors or enter "
+                "manual trap counts to enable pest outbreak detection."
+            ),
+            "color": "GREY",
+            "data_source": "NO_SENSOR_DATA"
+        }
     latest_count = pest_counts[-1]
     is_accelerating = len(pest_counts) >= 3 and (pest_counts[-1] - pest_counts[-2]) > (pest_counts[-2] - pest_counts[-3])
     
@@ -174,23 +231,48 @@ def compute_4zone_farm_status(sensor_data: Dict[str, Any]) -> Dict[str, Any]:
     - Zone 4: West Plot (Fungal Disease & Micro-Climate Vulnerability)
     Also computes composite Disaster Scores (Drought, Flood, Heat, Disease, Pests, Health).
     """
-    z1_moisture = float(sensor_data.get("z1_moisture", 45.0) or 45.0)
-    z2_moisture = float(sensor_data.get("z2_moisture", 16.0) or 16.0)
+    # Resolve sensor values — None means "sensor not connected / no reading".
+    # Do NOT substitute crisis defaults (e.g. 16.0 drought-level moisture, 35°C heat).
+    # Scores that depend on missing sensors are set to 0 (unknown, not alarming).
+    z1_moisture_raw = sensor_data.get("z1_moisture")
+    z2_moisture_raw = sensor_data.get("z2_moisture")
+    z4_humidity_raw = sensor_data.get("z4_humidity")
+    air_temp_raw    = sensor_data.get("air_temp")
+    rain_prob_raw   = sensor_data.get("rain_prob")
+
+    z1_moisture = float(z1_moisture_raw) if z1_moisture_raw is not None else None
+    z2_moisture = float(z2_moisture_raw) if z2_moisture_raw is not None else None
     z3_pest_count = sensor_data.get("z3_pest_count")
-    z3_pest_count = int(z3_pest_count) if z3_pest_count is not None else 0
-    z4_humidity = float(sensor_data.get("z4_humidity", 90.0) or 90.0)
-    air_temp = float(sensor_data.get("air_temp", 35.0) or 35.0)
-    rain_prob = float(sensor_data.get("rain_prob", 20.0) or 20.0)
+    z3_pest_count = int(z3_pest_count) if z3_pest_count is not None else None
+    z4_humidity = float(z4_humidity_raw) if z4_humidity_raw is not None else None
+    air_temp   = float(air_temp_raw)   if air_temp_raw   is not None else None
+    rain_prob  = float(rain_prob_raw)  if rain_prob_raw  is not None else None
     ec_salinity = sensor_data.get("ec_salinity")
     ec_salinity = float(ec_salinity) if ec_salinity is not None else None
 
-    irrigation_eval = evaluate_smart_irrigation(z2_moisture, air_temp, rain_prob)
-    pest_eval = evaluate_pest_trend([4, 7, 13, z3_pest_count])
+    # Zone 2: Irrigation — only evaluate when soil moisture is available
+    if z2_moisture is not None:
+        irrigation_eval = evaluate_smart_irrigation(z2_moisture, air_temp, rain_prob)
+    else:
+        irrigation_eval = {
+            "status": "DATA_UNAVAILABLE",
+            "color": "GREY",
+            "recommendation": "No soil moisture sensor data available for Zone 2."
+        }
 
-    # Zone 4 disease analysis
-    disease_status = "HIGH FUNGAL DISEASE RISK" if z4_humidity > 85 else ("MODERATE FUNGAL RISK" if z4_humidity > 70 else "LOW DISEASE RISK")
-    disease_color = "PURPLE" if z4_humidity > 85 else ("YELLOW" if z4_humidity > 70 else "GREEN")
-    
+    # Pass only the real current count. evaluate_pest_trend handles the missing-data case.
+    pest_eval = evaluate_pest_trend([z3_pest_count] if z3_pest_count is not None else [])
+
+    # Zone 4: Disease — only evaluate when humidity is available
+    if z4_humidity is not None:
+        disease_status = "HIGH FUNGAL DISEASE RISK" if z4_humidity > 85 else ("MODERATE FUNGAL RISK" if z4_humidity > 70 else "LOW DISEASE RISK")
+        disease_color  = "PURPLE" if z4_humidity > 85 else ("YELLOW" if z4_humidity > 70 else "GREEN")
+        disease_action = "Apply preventive bio-fungicide. High humidity accelerates spore germination." if z4_humidity > 85 else "Micro-climate clear."
+    else:
+        disease_status = "DATA_UNAVAILABLE"
+        disease_color  = "GREY"
+        disease_action = "No humidity sensor data for Zone 4. Install sensor to enable fungal risk detection."
+
     zones = {
         "zone_1": {
             "name": "Zone 1 (North Block - Paddy)",
@@ -218,19 +300,22 @@ def compute_4zone_farm_status(sensor_data: Dict[str, Any]) -> Dict[str, Any]:
             "status": disease_status,
             "color": disease_color,
             "humidity": z4_humidity,
-            "action": "Apply preventive bio-fungicide. High humidity accelerates spore germination." if z4_humidity > 85 else "Micro-climate clear."
+            "action": disease_action
         }
     }
 
-    # Disaster scores
-    drought_score = round(max(0.0, min(100.0, (28.0 - z2_moisture) * 4.5)), 1)
-    heat_score = round(min(100.0, max(0.0, (air_temp - 28.0) * 7.0)), 1)
-    disease_score = round(min(100.0, z4_humidity * 0.95), 1)
-    pest_score = round(min(100.0, z3_pest_count * 3.5), 1)
-    
+    # Disaster scores — set to 0 when the required sensor is missing (unknown ≠ no risk)
+    drought_score = round(max(0.0, min(100.0, (28.0 - z2_moisture) * 4.5)), 1) if z2_moisture is not None else 0.0
+    heat_score    = round(min(100.0, max(0.0, (air_temp - 28.0) * 7.0)), 1)   if air_temp    is not None else 0.0
+    disease_score = round(min(100.0, z4_humidity * 0.95), 1)                   if z4_humidity is not None else 0.0
+    pest_score    = round(min(100.0, z3_pest_count * 3.5), 1)                  if z3_pest_count is not None else 0.0
+
     # Flood risk derived from high moisture (>45%) + incoming rain probability
-    soil_saturation = max(0.0, z2_moisture - 45.0)
-    flood_score = round(min(100.0, max(0.0, (soil_saturation * 1.6) + (rain_prob * 0.5))), 1)
+    if z2_moisture is not None and rain_prob is not None:
+        soil_saturation = max(0.0, z2_moisture - 45.0)
+        flood_score = round(min(100.0, max(0.0, (soil_saturation * 1.6) + (rain_prob * 0.5))), 1)
+    else:
+        flood_score = 0.0
 
     # Dynamic farm health score (100 minus weighted penalties)
     overall_health = max(15, min(100, round(100 - (
@@ -260,27 +345,49 @@ def compute_4zone_farm_status(sensor_data: Dict[str, Any]) -> Dict[str, Any]:
     advisory_alerts = [
         {
             "category": "Irrigation",
-            "alert": "Irrigate now (Zone 2 critical)" if z2_moisture < 20 and rain_prob < 50 else ("Delay irrigation (Rain expected)" if z2_moisture < 25 and rain_prob >= 50 else ("Over-irrigation: drain furrows" if z2_moisture > 80 else "Soil moisture optimal")),
+            "alert": (
+                "Irrigate now (Zone 2 critical)" if z2_moisture is not None and z2_moisture < 20 and (rain_prob or 0) < 50
+                else "Delay irrigation (Rain expected)" if z2_moisture is not None and z2_moisture < 25 and (rain_prob or 0) >= 50
+                else "Over-irrigation: drain furrows" if z2_moisture is not None and z2_moisture > 80
+                else "Soil moisture optimal" if z2_moisture is not None
+                else "No soil moisture sensor data"
+            ),
             "status": irrigation_eval["status"],
-            "severity": "CRITICAL" if z2_moisture < 20 else ("WARNING" if z2_moisture > 80 else "NORMAL")
+            "severity": (
+                "CRITICAL" if z2_moisture is not None and z2_moisture < 20
+                else "WARNING" if z2_moisture is not None and z2_moisture > 80
+                else "NORMAL"
+            )
         },
         {
             "category": "Disease",
-            "alert": "Possible disease detected: High fungal risk in Zone 4" if z4_humidity > 85 else "Foliar disease risk clear",
+            "alert": (
+                "Possible disease detected: High fungal risk in Zone 4" if z4_humidity is not None and z4_humidity > 85
+                else "Foliar disease risk clear" if z4_humidity is not None
+                else "No humidity sensor data for Zone 4"
+            ),
             "status": disease_status,
-            "severity": "WARNING" if z4_humidity > 85 else "NORMAL"
+            "severity": "WARNING" if z4_humidity is not None and z4_humidity > 85 else "NORMAL"
         },
         {
             "category": "Pests",
-            "alert": f"Pest activity increasing ({z3_pest_count} insects)" if z3_pest_count > 15 else "Pest activity within threshold",
+            "alert": (
+                f"Pest activity increasing ({z3_pest_count} insects)" if z3_pest_count is not None and z3_pest_count > 15
+                else "Pest activity within threshold" if z3_pest_count is not None
+                else "No pest trap-count data"
+            ),
             "status": pest_eval["risk_level"],
-            "severity": "WARNING" if z3_pest_count > 15 else "NORMAL"
+            "severity": "WARNING" if z3_pest_count is not None and z3_pest_count > 15 else "NORMAL"
         },
         {
             "category": "Heat Stress",
-            "alert": f"Heat-stress warning ({air_temp}°C exceeds 33°C)" if air_temp > 33 else "Thermal conditions optimal",
-            "status": "ELEVATED HEAT" if air_temp > 33 else "NORMAL",
-            "severity": "WARNING" if air_temp > 33 else "NORMAL"
+            "alert": (
+                f"Heat-stress warning ({air_temp}°C exceeds 33°C)" if air_temp is not None and air_temp > 33
+                else "Thermal conditions optimal" if air_temp is not None
+                else "No air temperature sensor data"
+            ),
+            "status": "ELEVATED HEAT" if air_temp is not None and air_temp > 33 else "NORMAL",
+            "severity": "WARNING" if air_temp is not None and air_temp > 33 else "NORMAL"
         },
         {
             "category": "Flood Risk",

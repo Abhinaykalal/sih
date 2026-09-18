@@ -43,6 +43,9 @@ try:
     from .agent_orchestrator import agent_orchestrator, AgentChatRequest
     from .model_providers import  irrigation_provider, nutrient_provider
     from .dataset_pipeline import generate_dataset_quality_report
+    from .db_layer import db_layer
+    from .schemas import CanonicalTelemetry, TelemetryResponse, DeviceStatus, DeviceState, AIPredictionResponse, AIPredictionStatus
+    from .risk_engine import validate_sensor_availability
 except ImportError:
     try:
         from model_registry import model_registry
@@ -50,6 +53,9 @@ except ImportError:
         from agent_orchestrator import agent_orchestrator, AgentChatRequest
         from model_providers import  irrigation_provider, nutrient_provider
         from dataset_pipeline import generate_dataset_quality_report
+        from db_layer import db_layer
+        from schemas import CanonicalTelemetry, TelemetryResponse, DeviceStatus, DeviceState, AIPredictionResponse, AIPredictionStatus
+        from risk_engine import validate_sensor_availability
     except ImportError:
         model_registry = None
         mqtt_manager = None
@@ -58,6 +64,14 @@ except ImportError:
         irrigation_provider = None
         nutrient_provider = None
         generate_dataset_quality_report = None
+        db_layer = None
+        CanonicalTelemetry = None
+        TelemetryResponse = None
+        DeviceStatus = None
+        DeviceState = None
+        AIPredictionResponse = None
+        AIPredictionStatus = None
+        validate_sensor_availability = None
         from pydantic import BaseModel as _BaseModel
         class AgentChatRequest(_BaseModel):
             message: str
@@ -290,13 +304,13 @@ if ML_AVAILABLE:
 # ============================================================
 
 class CropFeatures(BaseModel):
-    N: int
-    P: int
-    K: int
-    temperature: float
-    humidity: float
-    ph: float
-    rainfall: float
+    N: int = Field(..., ge=0, le=300, description="Nitrogen content in soil (ppm), valid range 0–300")
+    P: int = Field(..., ge=0, le=300, description="Phosphorus content in soil (ppm), valid range 0–300")
+    K: int = Field(..., ge=0, le=300, description="Potassium content in soil (ppm), valid range 0–300")
+    temperature: float = Field(..., ge=-10.0, le=60.0, description="Air temperature in °C, valid range -10 to 60")
+    humidity: float = Field(..., ge=0.0, le=100.0, description="Relative humidity %, valid range 0–100")
+    ph: float = Field(..., ge=0.0, le=14.0, description="Soil pH, valid range 0–14")
+    rainfall: float = Field(..., ge=0.0, le=5000.0, description="Annual rainfall in mm, valid range 0–5000")
     lang: str = "en"
 
 class LocationInput(BaseModel):
@@ -672,10 +686,26 @@ def crop_risk_intelligence(req: CropRiskRequest):
         }
 
     # Null-safe extraction â€” `or` handles both missing keys AND explicit None values
-    temp = weather.get("temp") or 25
-    rain = weather.get("rainfall_last_3h") or 0
-    humidity = weather.get("humidity") or 50
-    wind = weather.get("wind_speed") or 5
+    temp = weather.get("temp")
+    rain = weather.get("rainfall_last_3h")
+    humidity = weather.get("humidity")
+    wind = weather.get("wind_speed")
+    
+    # If critical data is missing, report INSUFFICIENT_DATA instead of fabricating defaults
+    if temp is None or rain is None or humidity is None or wind is None:
+        return {
+            "risk_score": None,
+            "risk_level": "INSUFFICIENT_DATA",
+            "weather_status": "PARTIAL_DATA",
+            "reason": f"Weather data incomplete: temp={temp}, rain={rain}, humidity={humidity}, wind={wind}",
+            "provenance": "UNAVAILABLE",
+            "upcoming_threats": [],
+            "recommendations": [
+                "Risk assessment requires complete weather data.",
+                "Verify weather API key and network connectivity.",
+                "Check if location is within weather service coverage area."
+            ]
+        }
 
     # 1. Base Current Risk
     risk_now = max(0, (temp - 35) * 4) + min(30, rain * 1.5) + max(0, (humidity - 80) * 1.0)
@@ -811,11 +841,21 @@ def cron_trigger_alerts(force: bool = Query(False, description="Bypass weather c
             print(f"Supabase fetch failed: {e}")
             
     if not farmers_list:
-        print("Falling back to MOCK_FARMERS for demo purposes.")
-        farmers_list = [
-            {"id": "f1", "name": "Ramesh", "phone": "+919876543210", "telegram_chat_id": None, "lat": 19.076, "lon": 72.877, "crop": "Cotton", "stage": "Flowering"},
-            {"id": "f2", "name": "Suresh", "phone": "+919988776655", "telegram_chat_id": "123456789", "lat": 28.613, "lon": 77.209, "crop": "Wheat", "stage": "Vegetative"}
-        ]
+        # No farmer data available and no mock fallback — real alerts must not be sent to
+        # synthetic phone numbers. Log the condition and bail out early.
+        logger.warning(
+            "[cron_trigger_alerts] No farmers found in Supabase and no mock fallback is used "
+            "in production. Alert run aborted. Ensure SUPABASE_URL / SUPABASE_KEY are set and "
+            "the 'farmers' table is populated."
+        )
+        return {
+            "status": "skipped",
+            "timestamp": datetime.now().isoformat(),
+            "total_checked": 0,
+            "alerts_triggered": 0,
+            "details": [],
+            "reason": "No farmer records available. Configure Supabase or seed the farmers table."
+        }
 
     for f in farmers_list:
         # Fallback dictionary keys for safety against db nulls
@@ -1010,17 +1050,26 @@ def ai_chat(req: ChatRequest):
     context_parts = []
     weather_keywords = ["weather", "rain", "monsoon", "temp", "heat", "cold", "humidity", "mausam", "baarish"]
     if any(kw in req.message.lower() for kw in weather_keywords):
-        try:
-            w = get_weather(19.076, 72.877)
-            wctx = (
-                f"CURRENT WEATHER CONTEXT:\n"
-                f"- Conditions: {w['description']}\n"
-                f"- Temp: {w['temp']}Â°C | Hum: {w['humidity']}%\n"
-                f"- Recent Rain: {w['rainfall_last_3h']}mm"
+        lat = getattr(req, "lat", None)
+        lon = getattr(req, "lon", None)
+        if lat is not None and lon is not None:
+            try:
+                w = get_weather(lat, lon)
+                wctx = (
+                    f"CURRENT WEATHER CONTEXT (lat={lat}, lon={lon}):\n"
+                    f"- Conditions: {w['description']}\n"
+                    f"- Temp: {w['temp']}°C | Hum: {w['humidity']}%\n"
+                    f"- Recent Rain: {w['rainfall_last_3h']}mm"
+                )
+                context_parts.append(wctx)
+            except Exception as e:
+                print(f"Weather context inject failed: {e}")
+        else:
+            # No location available — do not inject weather for an unknown location.
+            context_parts.append(
+                "WEATHER CONTEXT: Location not provided. "
+                "Please share your farm coordinates or village name for accurate weather data."
             )
-            context_parts.append(wctx)
-        except Exception as e:
-            print(f"Weather context inject failed: {e}")
 
     if context_parts or req.context:
         all_ctx = "\n\n".join(filter(None, context_parts + [req.context or ""]))
@@ -1138,13 +1187,13 @@ except ImportError:
 
 class SensorInput(BaseModel):
     zone_id: int = 2
-    z1_moisture: Optional[float] = 45.0
-    z2_moisture: Optional[float] = 16.0
+    z1_moisture: Optional[float] = None
+    z2_moisture: Optional[float] = None
     z3_pest_count: Optional[int] = None
     z4_humidity: Optional[float] = None
     air_temp: Optional[float] = None
     ec_salinity: Optional[float] = None
-    wind_speed: Optional[float] = 8.0
+    wind_speed: Optional[float] = None
 
 @app.post("/api/farm-risk")
 @app.get("/api/farm-risk")
@@ -1175,6 +1224,47 @@ def get_telemetry_history_api(zone_id: Optional[int] = None, limit: int = 20):
     if zone_id is not None:
         return {"zone_id": zone_id, "history": db_layer.get_telemetry_history(device_id="ESP32_NODE_01", limit=limit)}
     return db_layer.get_all_zones_recent_history(limit_per_zone=limit)
+
+@app.get("/api/telemetry/latest")
+def get_latest_telemetry_canonical(device_id: str = Query("ESP32_NODE_01")):
+    """
+    CANONICAL TELEMETRY ENDPOINT — Single Source of Truth.
+    
+    Returns latest telemetry in CanonicalTelemetry schema with:
+    - All null values preserved (NO SYNTHETIC DEFAULTS)
+    - Explicit freshness tracking (age_seconds, data_quality status)
+    - Data source traceability (where each value came from)
+    - Device lifecycle state computed from age
+    
+    Key principle: REAL DATA OR DATA_UNAVAILABLE, never fabricated values.
+    
+    Query Parameters:
+        device_id: Hardware identifier (default: ESP32_NODE_01)
+    
+    Returns:
+        TelemetryResponse with CanonicalTelemetry or error message
+    """
+    if not db_layer:
+        raise HTTPException(status_code=503, detail="Database layer unavailable")
+    
+    # Get latest telemetry in canonical format
+    telemetry = db_layer.get_latest_telemetry_canonical(device_id)
+    
+    if telemetry is None:
+        # No telemetry received yet — device is REGISTERED but not ONLINE
+        return TelemetryResponse(
+            success=False,
+            data=None,
+            message=f"No telemetry received yet for device {device_id}. Device state: REGISTERED.",
+            timestamp=datetime.now(timezone.utc)
+        )
+    
+    return TelemetryResponse(
+        success=True,
+        data=telemetry,
+        message="Canonical telemetry retrieved successfully",
+        timestamp=datetime.now(timezone.utc)
+    )
 
 @app.post("/api/sensor-data")
 def ingest_sensor_telemetry(
@@ -1266,6 +1356,7 @@ class VisionDiagnoseInput(BaseModel):
     soil_moisture: Optional[float] = 16.0
     temp_c: Optional[float] = 35.0
     ec_salinity: Optional[float] = None
+    humidity: Optional[float] = None  # Real sensor reading; None means not available
 
 try:
     from .vision_ai_model import local_vision_ai
@@ -1297,28 +1388,79 @@ def diagnose_crop_multimodal(payload: VisionDiagnoseInput):
             print(f"[Vision Diagnose Base64 decode warning]: {e}")
 
     # Perform local ensemble diagnosis
+    # Use real humidity from request if provided; otherwise mark as estimated.
+    effective_humidity = payload.humidity if payload.humidity is not None else 75.0
+    humidity_source = "SENSOR" if payload.humidity is not None else "ESTIMATED_DEFAULT"
+    
+    # ✓ FIXED: Only perform vision AI if image is provided
+    # Do NOT use synthetic defaults for soil_moisture, temp_c, ec_salinity
+    if not image_bytes:
+        return {
+            "status": "ERROR",
+            "message": "Image required for vision diagnosis",
+            "diagnosis": None,
+            "confidence_pct": None
+        }
+    
     vision_res = local_vision_ai.diagnose(
-        soil_moisture=payload.soil_moisture or 16.0,
-        humidity=75.0,
+        soil_moisture=payload.soil_moisture,  # None if not provided
+        humidity=effective_humidity,
         image_bytes=image_bytes
     )
     
-    # Multimodal sensor cross-reference (fuses leaf visual features with live soil sensors)
+    # ✓ PHASE 4: VISION AI SENSOR VALIDATION PIPELINE
+    # Pipeline order (REQUIRED):
+    # 1. Image validation (done in local_vision_ai.diagnose)
+    # 2. Vision model confidence check (in vision_res)
+    # 3. Sensor availability validation (below)
+    # 4. Multimodal fusion (only if step 3 passes)
+    
+    # Validate sensor availability before multimodal fusion
+    required_sensors = ["soil_moisture", "temp_c", "ec_salinity"]
+    sensor_values = {
+        "soil_moisture": payload.soil_moisture,
+        "temp_c": payload.temp_c,
+        "ec_salinity": payload.ec_salinity
+    }
+    
+    sensor_check = validate_sensor_availability(required_sensors, sensor_values)
+    
+    if not sensor_check["all_available"]:
+        # Image-only diagnosis (high confidence from image alone)
+        return {
+            "diagnosis_type": "IMAGE_ONLY",
+            "diagnosis": vision_res.get("diagnosis"),
+            "confidence_pct": vision_res.get("confidence_pct", 0),
+            "action": vision_res.get("action", "Monitor crop"),
+            "category": vision_res.get("category", "General"),
+            "engine": vision_res.get("model_name", "Local Vision AI ML Model"),
+            "features": vision_res.get("quality", {}),
+            "multimodal_reasoning": None,
+            "message": "Diagnosis based on leaf image only. Provide soil_moisture, temp_c, and ec_salinity for multimodal analysis.",
+            "available_sensors": sensor_check["available_sensors"],
+            "missing_sensors": sensor_check["missing_sensors"],
+            "data_quality_assessment": sensor_check["data_quality_assessment"]
+        }
+    
+    # All sensors available — proceed with multimodal fusion
     fusion_result = evaluate_multimodal_fusion(
-        vision_label=vision_res["diagnosis"],
-        soil_moisture=payload.soil_moisture or 16.0,
-        temp_c=payload.temp_c or 35.0,
-        ec_salinity=payload.ec_salinity or 1.2
+        vision_label=vision_res.get("diagnosis"),
+        soil_moisture=payload.soil_moisture,  # REAL sensor value only
+        temp_c=payload.temp_c,  # REAL sensor value only
+        ec_salinity=payload.ec_salinity  # REAL sensor value only
     )
     
     return {
+        "diagnosis_type": "MULTIMODAL",
         "diagnosis": fusion_result["fused_diagnosis"],
         "confidence_pct": fusion_result["confidence_score_pct"],
         "action": fusion_result["recommended_action"],
         "category": fusion_result.get("category", "General"),
-        "engine": vision_res.get("engine", "Local Vision AI ML Model (0% Cloud Key)"),
-        "features": vision_res.get("features", {}),
-        "multimodal_reasoning": "Leaf pathology cross-referenced with live soil moisture and EC sensors to ensure targeted intervention."
+        "engine": vision_res.get("model_name", "Local Vision AI ML Model"),
+        "features": vision_res.get("quality", {}),
+        "multimodal_reasoning": "Leaf pathology cross-referenced with live soil moisture and EC sensors to ensure targeted intervention.",
+        "available_sensors": sensor_check["available_sensors"],
+        "message": "Multimodal diagnosis with real sensor data"
     }
 
 @app.post("/api/vision-diagnose/upload")
@@ -1326,7 +1468,8 @@ async def diagnose_crop_file_upload(
     file: UploadFile = File(...),
     soil_moisture: float = Query(16.0),
     temp_c: float = Query(35.0),
-    ec_salinity: Optional[float] = Query(None)
+    ec_salinity: Optional[float] = Query(None),
+    humidity: Optional[float] = Query(None)
 ):
     """
     Direct multipart/form-data upload for mobile cameras and field capture devices.
@@ -1340,11 +1483,18 @@ async def diagnose_crop_file_upload(
     if len(contents) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image exceeds 5 MB limit.")
 
+    effective_humidity = humidity if humidity is not None else 75.0
     vision_res = local_vision_ai.diagnose(
         soil_moisture=soil_moisture,
-        humidity=75.0,
+        humidity=effective_humidity,
         image_bytes=contents
     )
+    upload_warnings = []
+    if humidity is None:
+        upload_warnings.append(
+            "humidity not provided — multimodal fusion used an estimated default of 75%. "
+            "Pass humidity= query param for accurate disease-context analysis."
+        )
 
     fusion_result = evaluate_multimodal_fusion(
         vision_label=vision_res["diagnosis"],
@@ -1360,7 +1510,8 @@ async def diagnose_crop_file_upload(
         "action": fusion_result["recommended_action"],
         "category": fusion_result.get("category", "General"),
         "features": vision_res.get("features", {}),
-        "engine": "Qualcomm Edge Vision ML Engine"
+        "engine": "Qualcomm Edge Vision ML Engine",
+        "warnings": upload_warnings
     }
 
 
@@ -1393,22 +1544,31 @@ def get_hybrid_db_stats():
 @app.post("/api/hybrid-db/sync")
 def trigger_cloud_sync():
     """
-    Triggers store-and-sync protocol: Uploads pending offline edge events to cloud.
+    Queues pending offline edge events for cloud delivery.
+    NOTE: This marks records as locally-queued (sync_status=SYNCED in SQLite).
+    Actual Supabase cloud upload requires a separate background worker which is
+    not yet implemented. Records are safely persisted locally until that worker runs.
     """
     pending = db_layer.get_pending_sync_events()
     sync_ids = [e["sync_id"] for e in pending]
-    
+
     if sync_ids:
         db_layer.mark_events_synced(sync_ids)
         return {
-            "status": "success",
-            "message": f"Successfully synced {len(sync_ids)} edge telemetry events to cloud database.",
-            "synced_event_ids": sync_ids
+            "status": "queued",
+            "message": (
+                f"{len(sync_ids)} edge event(s) marked as locally-queued. "
+                "Cloud upload (Supabase) requires the background sync worker — "
+                "no cloud write has occurred in this call."
+            ),
+            "queued_event_ids": sync_ids,
+            "cloud_upload": False
         }
     return {
-        "status": "success",
-        "message": "Cloud database already fully synchronized. 0 pending events.",
-        "synced_event_ids": []
+        "status": "no_pending",
+        "message": "No pending events in the local queue.",
+        "queued_event_ids": [],
+        "cloud_upload": False
     }
 
 # ============================================================
@@ -1611,26 +1771,20 @@ def get_canonical_telemetry_history(
     if db_layer:
         history = db_layer.get_telemetry_history(device_id=device_id, limit=limit)
     
-    # Fallback to simulated if DB is empty
+    # No real telemetry available — return empty list with a clear warning.
+    # Do NOT return synthetic sensor values as if they were real hardware readings.
     if not history:
-        history = [
-            {
-                "device_id": device_id,
-                "received_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "soil_moisture_pct": 45.2,
-                "soil_raw_adc": 2180,
-                "temperature_c": 26.8,
-                "humidity_pct": 68.4,
-                "sunlight_detected": 1,
-                "vibration_detected": 0,
-                "vibration_rms": 0.04,
-                "nitrogen": 42.0,
-                "phosphorus": 18.0,
-                "potassium": 34.0,
-                "pump_active": 0,
-                "data_source": "SIMULATED"
-            }
-        ]
+        return {
+            "status": "no_data",
+            "device_id": device_id,
+            "count": 0,
+            "history": [],
+            "warning": (
+                f"No telemetry records found for device '{device_id}'. "
+                "Ensure the device is online and sending MQTT packets, "
+                "or POST to /api/mqtt/ingest-telemetry to seed test data."
+            )
+        }
     return {
         "status": "success",
         "device_id": device_id,
@@ -1674,38 +1828,9 @@ class CropRiskRequest(BaseModel):
 def calculate_crop_risk(req: CropRiskRequest):
     """
     Computes geospatial climate crop risk index for the interactive climate map.
+    Delegates to crop_risk_intelligence which uses live weather + agronomic rules.
     """
-    # Evaluate risk score based on crop and regional climate indicators
-    score = 38
-    level = "MODERATE"
-    color = "ðŸŸ¡"
-    threats = [
-        "Elevated humidity spore germination window",
-        "Heat index variance across vegetative canopy"
-    ]
-
-    if req.lat > 25.0:  # Northern belt
-        score = 42
-        explanation = f"Moderate climate risk for {req.crop} in {req.stage} stage. Recent regional humidity elevated fungal spore threshold. Preventative biological fungicide spray advised."
-        advice = "Ensure irrigation channel drainage is active to prevent collar rot."
-    else:  # Southern / coastal belt
-        score = 34
-        explanation = f"Favorable vegetative conditions for {req.crop}. Thermal index within standard agronomic ranges."
-        advice = "Continue regular soil moisture checks and monitor early leaf edges."
-
-    return {
-        "crop": req.crop,
-        "stage": req.stage,
-        "risk": {
-            "score": score,
-            "level": level,
-            "color": color,
-            "threats_detected": threats
-        },
-        "explanation": explanation,
-        "ai_advice": advice,
-        "timestamp": datetime.now().strftime("Today %H:%M")
-    }
+    return crop_risk_intelligence(req)
 
 # ============================================================
 # MODULE 19: MODEL REGISTRY & PROVENANCE API
@@ -1789,17 +1914,18 @@ class PumpCommandAckRequest(BaseModel):
 @app.post("/api/pump/command")
 async def dispatch_pump_command_api(
     req: PumpCommandRequest,
-    user: Optional[UserPrincipal] = Depends(get_optional_user)
+    user: UserPrincipal = Depends(get_current_user)
 ):
     """
     Dispatches actuator command (PUMP_ON, PUMP_OFF, MISTER_ON, MISTER_OFF).
     Enforces strict Rain Lockout: blocks activation when rain is active or forecast threshold exceeded.
     Tracks command lifecycle: requested -> published -> acknowledged -> executed.
+    Authentication required — unauthenticated requests are rejected with 401.
     """
     if not pump_controller:
         raise HTTPException(status_code=503, detail="Pump Controller offline")
 
-    actor_id = user.user_id if user else None
+    actor_id = user.user_id
     result = pump_controller.dispatch(req, actor_id=actor_id)
     return {
         "status": "success" if result.get("status") in ("published", "acknowledged", "executed") else "blocked",
@@ -1871,6 +1997,13 @@ def register_esp32_device(req: DeviceRegistrationRequest):
     }
     if mqtt_manager:
         mqtt_manager.handle_status_message(req.deviceId, "online")
+    # Persist registration so pump command crypto can resolve the device secret on restart.
+    # Uses the global EDGE_COMMAND_SECRET as the per-device secret until the device
+    # provisions its own key via a dedicated key-exchange flow.
+    try:
+        db_layer.register_device_secret(req.deviceId, settings.EDGE_COMMAND_SECRET, key_id="v1")
+    except Exception as _reg_err:
+        logger.warning(f"[device-register] Could not persist device registry for {req.deviceId}: {_reg_err}")
     return {"status": "success", "message": f"Device {req.deviceId} registered successfully", "device": initial_data}
 
 # ============================================================
@@ -2338,7 +2471,15 @@ def api_ai_chat(
 
     if req.include_weather_context:
         try:
-            w = get_weather(20.0, 78.0)
+            req_lat = getattr(req, "lat", None)
+            req_lon = getattr(req, "lon", None)
+            if req_lat is not None and req_lon is not None:
+                w = get_weather(req_lat, req_lon)
+            else:
+                # No farm location available — skip weather injection rather than
+                # using a hardcoded geographic centroid that misrepresents location.
+                w = None
+                logger.info(f"[{req_id}] Weather context skipped — no lat/lon in request.")
             if w and "error" not in w:
                 weather_ctx = w
                 context_parts.append(

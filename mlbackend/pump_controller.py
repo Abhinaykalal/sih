@@ -270,10 +270,20 @@ class PumpCommandController:
             except Exception:
                 pass
 
-        reported_state = "ON" if latest_cmd and latest_cmd.get("status") == "ACTUATION_ACCEPTED" and desired_state == "PUMP_ON" else "OFF"
+        reported_state = (
+            "ON"
+            if latest_cmd
+            and latest_cmd.get("status") == "ACTUATION_ACCEPTED"
+            and desired_state in ("PUMP_ON", "MISTER_ON")
+            else "OFF"
+        )
+
+        # Check live telemetry for active rain — do not hardcode False.
+        live_tel = db_layer.get_latest_telemetry()
+        live_rain = bool(live_tel.get("rain") or live_tel.get("rain_detected")) if live_tel else False
 
         is_locked_out, lockout_reason = RainLockoutDecision.evaluate(
-            active_rain=False,
+            active_rain=live_rain,
             rain_prob=latest_cmd.get("rain_probability_pct", 0.0) if latest_cmd else 0.0,
             rain_mm=latest_cmd.get("rain_forecast_mm", 0.0) if latest_cmd else 0.0
         )

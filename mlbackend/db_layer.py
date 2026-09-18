@@ -343,19 +343,36 @@ class DatabaseAbstractionLayer:
         conn.close()
         return rows
 
-    def get_latest_telemetry(self, farm_id: str = "farm-alpha", zone_id: str = "zone-1") -> Optional[Dict[str, Any]]:
-        """Fetches the latest canonical telemetry reading from local cache."""
+    def get_latest_telemetry(self, farm_id: str = "farm-alpha", zone_id: str = "zone-1", device_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Fetches the latest canonical telemetry reading from local cache.
+
+        NOTE: The canonical_telemetry table is keyed by device_id, not farm_id/zone_id.
+        The farm_id and zone_id parameters are accepted for API compatibility but are NOT
+        used as filter criteria because no farm_id/zone_id columns exist in the table.
+        Pass device_id to scope the query to a specific hardware node.
+        """
         conn = sqlite3.connect(ANALYTICS_DB_PATH)
         c = conn.cursor()
         try:
-            c.execute("""
-                SELECT received_at, soil_moisture_pct, temperature_c, humidity_pct,
-                       nitrogen, phosphorus, potassium, pump_active, data_source
-                FROM canonical_telemetry 
-                ORDER BY id DESC LIMIT 1
-            """)
+            if device_id:
+                c.execute("""
+                    SELECT received_at, soil_moisture_pct, temperature_c, humidity_pct,
+                           nitrogen, phosphorus, potassium, pump_active, data_source
+                    FROM canonical_telemetry
+                    WHERE device_id = ?
+                    ORDER BY id DESC LIMIT 1
+                """, (device_id,))
+            else:
+                c.execute("""
+                    SELECT received_at, soil_moisture_pct, temperature_c, humidity_pct,
+                           nitrogen, phosphorus, potassium, pump_active, data_source
+                    FROM canonical_telemetry
+                    ORDER BY id DESC LIMIT 1
+                """)
             row = c.fetchone()
             if row:
+                pump_raw = row[7]
                 return {
                     "received_at": row[0],
                     "soil_moisture": row[1],
@@ -364,7 +381,9 @@ class DatabaseAbstractionLayer:
                     "nitrogen": row[4],
                     "phosphorus": row[5],
                     "potassium": row[6],
-                    "pump_active": bool(row[7]) if row[7] is not None else False,
+                    # Preserve NULL as None — do NOT coerce unknown pump state to False.
+                    # Callers must treat None as "state unknown", not "pump is off".
+                    "pump_active": True if pump_raw == 1 else (False if pump_raw == 0 else None),
                     "data_source": row[8],
                     "is_stale": False
                 }
@@ -537,6 +556,231 @@ class DatabaseAbstractionLayer:
         conn.close()
         return updated
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Phase 1: FRESHNESS TRACKING & DEVICE STATE COMPUTATION (Architecture Remediation)
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    def compute_device_state(self, device_id: str) -> str:
+        """
+        Computes device state (REGISTERED/ONLINE/STALE/OFFLINE/ERROR) based on telemetry age.
+        
+        State Logic:
+        - REGISTERED: Device created, no telemetry received yet
+        - ONLINE: Telemetry ≤ TELEMETRY_LIVE_THRESHOLD_SECONDS (10 min)
+        - STALE: Telemetry > LIVE but ≤ TELEMETRY_STALE_THRESHOLD_SECONDS (6 hours)
+        - OFFLINE: Telemetry > STALE (device unreachable)
+        - ERROR: Device error state (reported by device)
+        
+        Returns:
+            One of: "REGISTERED", "ONLINE", "STALE", "OFFLINE", "ERROR"
+        """
+        # Check if device has ever received telemetry
+        conn = sqlite3.connect(ANALYTICS_DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT received_at FROM canonical_telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 1", (device_id,))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            return "REGISTERED"  # No telemetry received yet
+        
+        received_at_iso = row[0]
+        try:
+            dt = datetime.strptime(received_at_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            age_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception:
+            return "ERROR"
+        
+        # Get thresholds from config
+        live_threshold = settings.TELEMETRY_LIVE_THRESHOLD_SECONDS  # 600s (10 min)
+        stale_threshold = settings.TELEMETRY_STALE_THRESHOLD_SECONDS  # 21600s (6 hours)
+        
+        if age_seconds <= live_threshold:
+            return "ONLINE"
+        elif age_seconds <= stale_threshold:
+            return "STALE"
+        else:
+            return "OFFLINE"
+
+    def compute_data_quality(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Computes data quality metadata (status, age_seconds, reason) for latest telemetry.
+        
+        Returns:
+            Dict with: status (LIVE/STALE/OFFLINE/UNAVAILABLE), age_seconds, received_at, reason
+            None if device has never received telemetry
+        """
+        conn = sqlite3.connect(ANALYTICS_DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT received_at FROM canonical_telemetry WHERE device_id = ? ORDER BY received_at DESC LIMIT 1", (device_id,))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            return {
+                "status": "UNAVAILABLE",
+                "age_seconds": None,
+                "received_at": None,
+                "reason": "No telemetry received yet"
+            }
+        
+        received_at_iso = row[0]
+        try:
+            dt = datetime.strptime(received_at_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            age_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception:
+            return {
+                "status": "UNAVAILABLE",
+                "age_seconds": None,
+                "received_at": None,
+                "reason": "Invalid timestamp format"
+            }
+        
+        # Get thresholds
+        live_threshold = settings.TELEMETRY_LIVE_THRESHOLD_SECONDS
+        stale_threshold = settings.TELEMETRY_STALE_THRESHOLD_SECONDS
+        
+        if age_seconds <= live_threshold:
+            status = "LIVE"
+            reason = f"Data fresh ({int(age_seconds)} seconds old)"
+        elif age_seconds <= stale_threshold:
+            status = "STALE"
+            hours = int(age_seconds / 3600)
+            reason = f"Data stale (received {hours} hours ago)"
+        else:
+            status = "OFFLINE"
+            days = int(age_seconds / 86400)
+            reason = f"Device offline (last telemetry {days} days ago)"
+        
+        return {
+            "status": status,
+            "age_seconds": age_seconds,
+            "received_at": received_at_iso,
+            "reason": reason
+        }
+
+    def get_latest_telemetry_canonical(self, device_id: str = "ESP32_NODE_01") -> Optional[Dict[str, Any]]:
+        """
+        Returns latest telemetry in CanonicalTelemetry schema format with freshness metadata.
+        
+        This is the CANONICAL endpoint — all data is real or None, never synthetic.
+        All null values preserved. Freshness tracking included.
+        
+        Args:
+            device_id: Hardware identifier
+            
+        Returns:
+            Dict matching CanonicalTelemetry schema or None if no telemetry exists
+        """
+        conn = sqlite3.connect(ANALYTICS_DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+            SELECT 
+                device_id, received_at, device_timestamp,
+                soil_moisture_pct, soil_raw_adc, temperature_c, humidity_pct,
+                sunlight_detected, vibration_detected, vibration_rms,
+                nitrogen, phosphorus, potassium,
+                pump_active, edge_ai_result, edge_ai_confidence, raw_payload, data_source
+            FROM canonical_telemetry
+            WHERE device_id = ?
+            ORDER BY received_at DESC
+            LIMIT 1
+        """, (device_id,))
+        row = c.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        (dev_id, received_at_iso, device_ts, soil_moist, soil_adc, temp_c, humidity,
+         sunlight, vibration_det, vibration_rms_val, nitrogen, phosphorus, potassium,
+         pump, edge_result, edge_conf, raw_payload_str, data_src) = row
+        
+        # Compute age and data quality
+        try:
+            dt_received = datetime.strptime(received_at_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            age_seconds = (datetime.now(timezone.utc) - dt_received).total_seconds()
+        except Exception:
+            age_seconds = None
+        
+        # Compute data quality status
+        quality = self.compute_data_quality(device_id)
+        if quality is None:
+            quality = {
+                "status": "UNAVAILABLE",
+                "age_seconds": None,
+                "received_at": None,
+                "reason": "Unable to compute quality"
+            }
+        
+        # Parse raw payload
+        try:
+            raw_payload = json.loads(raw_payload_str) if raw_payload_str else {}
+        except Exception:
+            raw_payload = {}
+        
+        # Build data_sources map (traceability)
+        data_sources = {
+            "soil_moisture_pct": data_src,
+            "soil_raw_adc": data_src,
+            "temperature_c": data_src,
+            "humidity_pct": data_src,
+            "sunlight_detected": data_src,
+            "vibration_rms": data_src,
+            "nitrogen": data_src,
+            "phosphorus": data_src,
+            "potassium": data_src,
+            "pump_active": data_src,
+            "edge_ai_result": data_src,
+            "edge_ai_confidence_pct": data_src
+        }
+        
+        # Build validation errors list (from raw_payload if captured)
+        validation_errors = []
+        if raw_payload.get("validation_errors"):
+            validation_errors = raw_payload.get("validation_errors", [])
+        
+        # Convert boolean fields (SQLite stores 0/1/None)
+        sunlight_bool = None if sunlight is None else bool(sunlight)
+        vibration_det_bool = None if vibration_det is None else bool(vibration_det)
+        pump_bool = None if pump is None else bool(pump)
+        
+        # Convert device_timestamp to ISO if it's a timestamp
+        device_ts_iso = None
+        if device_ts:
+            try:
+                if isinstance(device_ts, int):
+                    # Unix timestamp
+                    device_ts_iso = datetime.fromtimestamp(device_ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                else:
+                    device_ts_iso = str(device_ts)
+            except Exception:
+                device_ts_iso = None
+        
+        # Build canonical telemetry response
+        return {
+            "device_id": dev_id,
+            "received_at": received_at_iso,
+            "device_timestamp": device_ts_iso,
+            "age_seconds": age_seconds,
+            "soil_moisture_pct": soil_moist,
+            "soil_raw_adc": soil_adc,
+            "temperature_c": temp_c,
+            "humidity_pct": humidity,
+            "sunlight_detected": sunlight_bool,
+            "vibration_detected": vibration_det_bool,
+            "vibration_rms": vibration_rms_val,
+            "nitrogen": nitrogen,
+            "phosphorus": phosphorus,
+            "potassium": potassium,
+            "pump_active": pump_bool,
+            "edge_ai_result": edge_result,
+            "edge_ai_confidence_pct": edge_conf,
+            "data_quality": quality,
+            "data_sources": data_sources,
+            "validation_errors": validation_errors
+        }
+
     # --- Legacy API Compatibility Methods (Migrated from database.py and hybrid_db.py) ---
     def get_pending_sync_count(self) -> int:
         """Counts how many commands/telemetry packets are pending cloud sync."""
@@ -548,16 +792,25 @@ class DatabaseAbstractionLayer:
         return count
 
     def get_all_zones_recent_history(self, limit_per_zone: int = 15) -> Dict[str, List[Dict[str, Any]]]:
-        """Returns structured time-series history for all physical zones (Legacy wrapper)."""
-        # Note: In the canonical telemetry table, we don't have zone_id. We only have device_id.
-        # This is a mock to support legacy callers like the risk engine which expect 4 zones.
-        # In a real migration, the caller should be updated, but for now we'll synthesize it.
+        """
+        Returns recent device-level telemetry history labelled per zone for legacy callers.
+
+        NOTE: The canonical_telemetry table is keyed by device_id, not by physical zone.
+        All zones currently map to the same device rows. This is a known schema limitation —
+        zone-level separation requires a device_id-per-zone deployment or a zone_id column.
+        The 'device_level_data' flag in the response signals this to callers.
+        """
         history = self.get_telemetry_history(limit=limit_per_zone)
         return {
             "zone_1": history,
             "zone_2": history,
             "zone_3": history,
             "zone_4": history,
+            "device_level_data": True,
+            "warning": (
+                "All zones reflect the same device-level telemetry stream. "
+                "Zone-level separation requires per-zone device deployment."
+            )
         }
 
     def get_db_stats(self) -> Dict[str, Any]:
