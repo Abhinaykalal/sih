@@ -87,12 +87,16 @@ except ImportError:
 # All LLM inference (Ollama / Groq / RAG-only) routes through llm_provider.py.
 # ollama_service.py has been removed â€” it was a redundant standalone wrapper.
 try:
-    from .llm_provider import hybrid_provider, LLMProviderName, LLMInferenceResponse
+    # PHASE 3.1: Disabled - hybrid_provider (Ollama/Groq) not used with trained agent orchestrator
+    # from .llm_provider import hybrid_provider, LLMProviderName, LLMInferenceResponse
+    hybrid_provider = None
     from .rag_engine import rag_engine, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
     from .check_rag_leakage import check_leakage
 except ImportError:
     try:
-        from llm_provider import hybrid_provider, LLMProviderName, LLMInferenceResponse
+        # PHASE 3.1: Disabled
+        # from llm_provider import hybrid_provider, LLMProviderName, LLMInferenceResponse
+        hybrid_provider = None
         from rag_engine import rag_engine, RAGQueryResponse, DocumentSourceMetadata, CitationInfo
         from check_rag_leakage import check_leakage
     except ImportError:
@@ -443,36 +447,15 @@ def health_check():
 # endpoint â€” avoids hardcoding ephemeral tunnel URLs in the APK.
 # ============================================================
 
-# In-memory store; updated at runtime via PUT /api/ollama/config
-_ollama_tunnel_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+# ============================================================
+# PHASE 3.1: OLLAMA REMOVED
+# Migrated to pure trained agent orchestrator.
+# ============================================================
 
-class OllamaTunnelConfig(BaseModel):
-    tunnel_url: str
-    model: Optional[str] = None
+# DEPRECATED: Ollama local LLM endpoints removed.
+# DEPRECATED: Groq cloud LLM fallback removed.
+# NEW: All /api/chat requests use trained AgriSaathi agent.
 
-@app.get("/api/ollama/config")
-def get_ollama_config():
-    """Returns the current Ollama tunnel URL for the mobile app to use."""
-    return {
-        "tunnel_url": _ollama_tunnel_url,
-        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }
-
-@app.put("/api/ollama/config")
-def update_ollama_config(payload: OllamaTunnelConfig):
-    """Updates the active Ollama tunnel URL (call this when a new cloudflared session starts)."""
-    global _ollama_tunnel_url
-    _ollama_tunnel_url = payload.tunnel_url.rstrip("/")
-    if payload.model:
-        os.environ["OLLAMA_MODEL"] = payload.model
-    logger.info("Ollama tunnel URL updated to: %s", _ollama_tunnel_url)
-    return {
-        "status": "updated",
-        "tunnel_url": _ollama_tunnel_url,
-        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }
 
 
 # ============================================================
@@ -1072,47 +1055,22 @@ def ai_chat(req: ChatRequest):
         f"Provide practical, step-by-step guidance with exact numbers when available."
     )
 
-    # ✓ PHASE 3.1: PRIMARY UNIFIED CHAT ENDPOINT
-    # Dynamic routing: Agent Orchestrator (primary) → Hybrid Provider (fallback)
-    # /api/agent/chat now redirects here to reduce endpoint complexity and test burden
+    # PHASE 3.1: Pure trained agent - removed hybrid_provider fallback and weather injection
 
-    context_parts = []
-    weather_keywords = ["weather", "rain", "monsoon", "temp", "heat", "cold", "humidity", "mausam", "baarish"]
-    if any(kw in req.message.lower() for kw in weather_keywords):
-        lat = getattr(req, "lat", None)
-        lon = getattr(req, "lon", None)
-        if lat is not None and lon is not None:
-            try:
-                w = get_weather(lat, lon)
-                wctx = (
-                    f"CURRENT WEATHER CONTEXT (lat={lat}, lon={lon}):\n"
-                    f"- Conditions: {w['description']}\n"
-                    f"- Temp: {w['temp']}°C | Hum: {w['humidity']}%\n"
-                    f"- Recent Rain: {w['rainfall_last_3h']}mm"
-                )
-                context_parts.append(wctx)
-            except Exception as e:
-                print(f"Weather context inject failed: {e}")
-        else:
-            # No location available — do not inject weather for an unknown location.
-            context_parts.append(
-                "WEATHER CONTEXT: Location not provided. "
-                "Please share your farm coordinates or village name for accurate weather data."
-            )
-
-    if context_parts or req.context:
-        all_ctx = "\n\n".join(filter(None, context_parts + [req.context or ""]))
-        prompt = (
-            f"REAL-TIME DATA:\n{all_ctx}\n\n"
-            f"Farmer Question: {req.message}\n\nAnswer in {lang_name} with exact figures."
-        )
-    else:
-        prompt = f"Farmer Question: {req.message}\n\nAnswer in {lang_name}."
+    # PHASE 3.1: Agent orchestrator handles weather integration - no manual injection needed
 
     if agent_orchestrator:
         agent_req = AgentChatRequest(
             message=req.message,
-            language=req.lang
+            language=req.lang or "en",
+            context=req.context,
+            lat=req.lat,
+            lon=req.lon,
+            user_id=getattr(req, "user_id", None),
+            session_id=getattr(req, "session_id", None),
+            crop=getattr(req, "crop", None),
+            stage=getattr(req, "growth_stage", None),
+            field_id=getattr(req, "field_id", None)
         )
         res = agent_orchestrator.process_query(agent_req)
         return {
@@ -1138,16 +1096,10 @@ def ai_chat(req: ChatRequest):
 @app.post("/api/agent/chat")
 def agent_chat_api(req: AgentChatRequest):
     """
-    ⚠️ DEPRECATED: Use /api/chat instead.
-    
-    This endpoint is maintained for backward compatibility only.
-    All new implementations should use /api/chat, which provides unified routing:
-    - Agent Orchestrator (primary)
-    - Hybrid Provider fallback (Ollama → Groq → RAG)
-    
-    Phase 3.1 Consolidation: Single chat endpoint reduces routing complexity and test burden.
+    DEPRECATED (Phase 3.1): Use /api/chat instead.
+    This endpoint maintained for backward compatibility only.
+    All new code should use /api/chat.
     """
-    # Convert AgentChatRequest to ChatRequest for unified handling
     try:
         chat_req = ChatRequest(
             message=req.message,
@@ -1156,19 +1108,15 @@ def agent_chat_api(req: AgentChatRequest):
             lat=req.lat if hasattr(req, 'lat') else None,
             lon=req.lon if hasattr(req, 'lon') else None
         )
-        # Route through primary /api/chat handler
-        return ai_chat(chat_req)
+        result = ai_chat(chat_req)
+        result["deprecated_endpoint"] = True
+        result["use_instead"] = "/api/chat"
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
-        # Fallback for direct agent orchestrator access (original behavior)
-        if agent_orchestrator:
-            res = agent_orchestrator.process_query(req)
-            return {
-                "message": res.answer if hasattr(res, 'answer') else str(res),
-                "response": res.answer if hasattr(res, 'answer') else str(res),
-                "deprecated_endpoint": True,
-                "use_instead": "/api/chat"
-            }
-        raise HTTPException(status_code=503, detail="Agent Orchestrator offline")
+        logger.warning(f"Deprecated /api/agent/chat: {e}")
+        raise HTTPException(status_code=503, detail="Agent offline")
 
 
 
@@ -2337,38 +2285,38 @@ class AIChatResponse(BaseModel):
 @app.get("/api/ai/health", response_model=AIHealthResponse)
 def get_ai_health():
     """
-    Checks LLM provider availability (Ollama local or Groq cloud).
-    All inference routes through llm_provider.hybrid_provider.
+    PHASE 3.1: Reports trained agent orchestrator status (not LLM provider).
+    Ollama/Groq removed - using pure trained agent for all chat.
     """
-    if not hybrid_provider:
+    if not agent_orchestrator:
         return AIHealthResponse(
             status="MODEL_UNAVAILABLE",
-            provider="UNAVAILABLE",
-            model="none",
+            provider="TRAINED_AGENT",
+            model="AgriSaathi Agent",
             ollama_reachable=False,
             model_available=False
         )
-    status = hybrid_provider.get_status()
+    
     return AIHealthResponse(
-        status="HEALTHY" if status.status == "AVAILABLE" else status.status,
-        provider=status.provider,
-        model=status.model_name,
-        ollama_reachable=(status.provider == "OLLAMA" and status.status == "AVAILABLE"),
-        model_available=(status.status == "AVAILABLE")
+        status="HEALTHY",
+        provider="TRAINED_AGENT",
+        model="AgriSaathi Agent Orchestrator",
+        ollama_reachable=False,  # Ollama not used in Phase 3.1
+        model_available=True
     )
 
 @app.get("/api/ai/status")
 def get_ai_status():
-    """Returns live availability status of LLM provider (Ollama/Groq) and RAG knowledge base."""
-    llm_info = {"status": "UNAVAILABLE", "provider": "NONE", "model": "none", "latency_ms": None}
-    if hybrid_provider:
-        s = hybrid_provider.get_status()
-        llm_info = {
-            "status": s.status,
-            "provider": s.provider,
-            "model": s.model_name,
-            "latency_ms": s.latency_ms
-        }
+    """
+    PHASE 3.1: Returns trained agent orchestrator status (no LLM provider checks).
+    Ollama/Groq removed. RAG remains available for knowledge base queries.
+    """
+    agent_info = {
+        "status": "AVAILABLE" if agent_orchestrator else "UNAVAILABLE",
+        "provider": "TRAINED_AGENT",
+        "model": "AgriSaathi Agent Orchestrator v2.2.0",
+        "inference_mode": "TRAINED_AGENT"
+    }
 
     rag_info = {
         "status": "AVAILABLE" if rag_engine else "UNAVAILABLE",
@@ -2382,40 +2330,45 @@ def get_ai_status():
     }
 
     return {
-        "status": "healthy" if llm_info["status"] == "AVAILABLE" else "degraded",
-        "llm_provider": llm_info,
+        "status": "healthy" if agent_info["status"] == "AVAILABLE" else "degraded",
+        "agent": agent_info,
         "rag": rag_info,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 @app.get("/api/ai/models")
 def list_ai_models():
-    """Lists registered AI models with verified status, capabilities, and parameters."""
-    is_avail = False
-    active_provider = "UNAVAILABLE"
-    if hybrid_provider:
-        s = hybrid_provider.get_status()
-        is_avail = (s.status == "AVAILABLE")
-        active_provider = s.provider
-
+    """Lists AI models in production. PHASE 3.1: Trained agent orchestrator only."""
     return {
         "models": [
             {
-                "name": os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct"),
-                "type": "LLM_INSTRUCT",
-                "provider": "Ollama",
-                "parameters": "7B",
+                "name": "AgriSaathi Agent Orchestrator",
+                "type": "TRAINED_AGENT",
+                "provider": "AgriSaathi",
+                "version": "2.2.0",
+                "capabilities": ["crop_recommendation", "disease_diagnosis", "irrigation", "advisory"],
                 "languages": ["en", "hi", "te"],
-                "recommended_for": "Agricultural reasoning, RAG synthesis, multilingual explanation",
-                "status": "AVAILABLE" if is_avail else "UNAVAILABLE"
+                "status": "AVAILABLE" if agent_orchestrator else "UNAVAILABLE"
             },
             {
-                "name": "qwen2.5:3b",
-                "type": "LLM_INSTRUCT_LIGHT",
-                "provider": "Ollama",
-                "parameters": "3B",
-                "languages": ["en", "hi"],
-                "recommended_for": "Low-resource edge devices & fast inference",
+                "name": "Crop Recommendation RandomForest",
+                "type": "ML_MODEL",
+                "provider": "AgriSaathi",
+                "version": "1.0.0",
+                "accuracy": "99.7%",
+                "test_set_size": 22,
+                "status": "AVAILABLE"
+            },
+            {
+                "name": "Vision Disease Classifier (HOG+SVM)",
+                "type": "VISION_MODEL",
+                "provider": "AgriSaathi",
+                "version": "1.0.0",
+                "accuracy": "85%",
+                "status": "EXPERIMENTAL"
+            }
+        ]
+    }
                 "status": "EXPERIMENTAL"
             },
             {

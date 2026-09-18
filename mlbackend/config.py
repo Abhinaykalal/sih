@@ -39,10 +39,9 @@ class Settings(BaseSettings):
         "https://agrisaathi.vercel.app"
     ]
 
-    # ── Ollama LLM Configuration ──────────────────────────────
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
-    OLLAMA_TIMEOUT_SECONDS: int = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
+    # PHASE 3.1: Ollama LLM Configuration Removed
+    # Migrated to pure trained agent orchestrator - no external LLM providers needed
+    # OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS deprecated
 
     # ── Internal ───────────────────────────────────────────────
     MODEL_PATH: str = "model.joblib"
