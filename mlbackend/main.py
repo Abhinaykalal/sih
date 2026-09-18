@@ -1072,6 +1072,10 @@ def ai_chat(req: ChatRequest):
         f"Provide practical, step-by-step guidance with exact numbers when available."
     )
 
+    # ✓ PHASE 3.1: PRIMARY UNIFIED CHAT ENDPOINT
+    # Dynamic routing: Agent Orchestrator (primary) → Hybrid Provider (fallback)
+    # /api/agent/chat now redirects here to reduce endpoint complexity and test burden
+
     context_parts = []
     weather_keywords = ["weather", "rain", "monsoon", "temp", "heat", "cold", "humidity", "mausam", "baarish"]
     if any(kw in req.message.lower() for kw in weather_keywords):
@@ -1134,12 +1138,37 @@ def ai_chat(req: ChatRequest):
 @app.post("/api/agent/chat")
 def agent_chat_api(req: AgentChatRequest):
     """
-    Primary AgriSaathi Agent Endpoint:
-    Dynamic intent detection, tool selection, evidence fusion, RAG retrieval, and response validation.
+    ⚠️ DEPRECATED: Use /api/chat instead.
+    
+    This endpoint is maintained for backward compatibility only.
+    All new implementations should use /api/chat, which provides unified routing:
+    - Agent Orchestrator (primary)
+    - Hybrid Provider fallback (Ollama → Groq → RAG)
+    
+    Phase 3.1 Consolidation: Single chat endpoint reduces routing complexity and test burden.
     """
-    if agent_orchestrator:
-        return agent_orchestrator.process_query(req)
-    raise HTTPException(status_code=503, detail="Agent Orchestrator offline")
+    # Convert AgentChatRequest to ChatRequest for unified handling
+    try:
+        chat_req = ChatRequest(
+            message=req.message,
+            lang=req.language if hasattr(req, 'language') else "en",
+            context=req.context if hasattr(req, 'context') else None,
+            lat=req.lat if hasattr(req, 'lat') else None,
+            lon=req.lon if hasattr(req, 'lon') else None
+        )
+        # Route through primary /api/chat handler
+        return ai_chat(chat_req)
+    except Exception as e:
+        # Fallback for direct agent orchestrator access (original behavior)
+        if agent_orchestrator:
+            res = agent_orchestrator.process_query(req)
+            return {
+                "message": res.answer if hasattr(res, 'answer') else str(res),
+                "response": res.answer if hasattr(res, 'answer') else str(res),
+                "deprecated_endpoint": True,
+                "use_instead": "/api/chat"
+            }
+        raise HTTPException(status_code=503, detail="Agent Orchestrator offline")
 
 
 
